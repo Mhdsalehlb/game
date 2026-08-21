@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="theme-color" content="#0b1020" />
+  <title>FocusBall — Eye-Tracking Focus Game</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>👁️</text></svg>" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <!-- Hidden camera feed used for face/eye tracking -->
+  <video id="camera" playsinline muted autoplay></video>
+
+  <canvas id="game"></canvas>
+
+  <!-- HUD -->
+  <div id="hud" class="hidden">
+    <div class="hud-left">
+      <div id="score" class="hud-pill">0</div>
+      <div id="streak" class="hud-pill streak hidden">FOCUS ×1</div>
+    </div>
+    <div class="hud-right">
+      <div id="lives" class="hud-pill">❤️❤️❤️</div>
+      <div id="trackDot" class="track-dot" title="Tracking status"></div>
+      <button id="pauseBtn" class="icon-btn" aria-label="Pause">⏸</button>
+    </div>
+  </div>
+
+  <!-- Start screen -->
+  <div id="startScreen" class="screen">
+    <div class="panel">
+      <div class="logo">👁️</div>
+      <h1>FocusBall</h1>
+      <p class="tagline">Steer the ball with your eyes and head.<br/>
+        Dodge the obstacles. Rebuild your focus.</p>
+
+      <div class="settings">
+        <label class="setting">
+          <span>Control mode</span>
+          <select id="modeSelect">
+            <option value="both" selected>Head + Eyes</option>
+            <option value="head">Head only</option>
+            <option value="eyes">Eyes only</option>
+            <option value="touch">Touch / Keyboard</option>
+          </select>
+        </label>
+        <label class="setting">
+          <span>Sensitivity</span>
+          <input id="sensitivity" type="range" min="0.5" max="3" step="0.1" value="1.5" />
+        </label>
+      </div>
+
+      <button id="startBtn" class="primary-btn">Start</button>
+      <p class="hint">Uses your front camera, processed entirely on your device.<br/>
+        Nothing is recorded or uploaded.</p>
+      <p id="startError" class="error hidden"></p>
+    </div>
+  </div>
+
+  <!-- Calibration screen -->
+  <div id="calibScreen" class="screen hidden">
+    <div class="calib-instructions">
+      <h2>Calibration</h2>
+      <p>Hold your phone at a comfortable distance.<br/>
+        Relax, and look at the dot until the ring closes.</p>
+    </div>
+    <div class="calib-target">
+      <svg viewBox="0 0 120 120" width="120" height="120">
+        <circle class="calib-ring-bg" cx="60" cy="60" r="52" />
+        <circle id="calibRing" class="calib-ring" cx="60" cy="60" r="52" />
+      </svg>
+      <div class="calib-dot"></div>
+    </div>
+    <p id="calibStatus" class="calib-status">Looking for your face…</p>
+  </div>
+
+  <!-- Pause overlay -->
+  <div id="pauseScreen" class="screen overlay hidden">
+    <div class="panel small">
+      <h2 id="pauseTitle">Paused</h2>
+      <p id="pauseMsg">Take a breath.</p>
+      <button id="resumeBtn" class="primary-btn">Resume</button>
+      <button id="quitBtn" class="ghost-btn">Quit to menu</button>
+    </div>
+  </div>
+
+  <!-- Game over screen -->
+  <div id="overScreen" class="screen overlay hidden">
+    <div class="panel small">
+      <h2>Session over</h2>
+      <div class="final-score"><span id="finalScore">0</span> pts</div>
+      <p id="bestScore" class="best"></p>
+      <p id="focusReport" class="focus-report"></p>
+      <button id="retryBtn" class="primary-btn">Play again</button>
+      <button id="menuBtn" class="ghost-btn">Menu</button>
+    </div>
+  </div>
+
+  <!-- MediaPipe Face Mesh (face + iris landmarks, all on-device) -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1675466862/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/face_mesh.js" crossorigin="anonymous"></script>
+
+  <script src="js/tracking.js"></script>
+  <script src="js/game.js"></script>
+</body>
+</html>

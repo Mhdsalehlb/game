@@ -155,10 +155,27 @@ h2 { font-size: 24px; font-weight: 700; margin-bottom: 8px; }
 }
 
 /* ---------- Calibration ---------- */
-.calib-instructions { text-align: center; margin-bottom: 40px; }
-.calib-instructions p { color: var(--dim); line-height: 1.6; margin-top: 6px; }
+.calib-instructions {
+  position: absolute;
+  top: calc(24px + env(safe-area-inset-top));
+  left: 0;
+  right: 0;
+  text-align: center;
+  padding: 0 24px;
+  pointer-events: none;
+}
+.calib-instructions p { color: var(--dim); line-height: 1.6; margin-top: 6px; font-size: 14px; }
 
-.calib-target { position: relative; width: 120px; height: 120px; }
+/* the target glides between the 5 calibration positions */
+.calib-target {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 120px;
+  height: 120px;
+  transform: translate(-50%, -50%);
+  transition: left 0.55s cubic-bezier(0.4, 0, 0.2, 1), top 0.55s cubic-bezier(0.4, 0, 0.2, 1);
+}
 
 .calib-dot {
   position: absolute;
@@ -195,7 +212,50 @@ h2 { font-size: 24px; font-weight: 700; margin-bottom: 8px; }
   transform-origin: 60px 60px;
 }
 
-.calib-status { margin-top: 36px; color: var(--dim); font-size: 15px; min-height: 22px; }
+.calib-status {
+  position: absolute;
+  bottom: calc(36px + env(safe-area-inset-bottom));
+  left: 0;
+  right: 0;
+  text-align: center;
+  color: var(--dim);
+  font-size: 15px;
+  min-height: 22px;
+  pointer-events: none;
+}
+
+/* ---------- Countdown ---------- */
+.countdown {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 15;
+  pointer-events: none;
+}
+
+.count-num {
+  font-size: 96px;
+  font-weight: 800;
+  background: linear-gradient(90deg, var(--accent), var(--accent2));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-shadow: none;
+}
+
+.count-hint {
+  margin-top: 8px;
+  color: var(--dim);
+  font-size: 15px;
+  background: rgba(10, 14, 32, 0.6);
+  border-radius: 999px;
+  padding: 8px 18px;
+}
+
+.count-hint:empty { display: none; }
 
 /* ---------- HUD ---------- */
 #hud {

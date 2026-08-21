@@ -237,7 +237,7 @@ h2 { font-size: 24px; font-weight: 700; margin-bottom: 8px; }
 }
 
 .count-num {
-  font-size: 96px;
+  font-size: 52px;
   font-weight: 800;
   background: linear-gradient(90deg, var(--accent), var(--accent2));
   -webkit-background-clip: text;
@@ -256,6 +256,55 @@ h2 { font-size: 24px; font-weight: 700; margin-bottom: 8px; }
 }
 
 .count-hint:empty { display: none; }
+
+/* ---------- Breathing interlude ---------- */
+.breath-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 40px;
+}
+
+.breath-circle {
+  width: 180px;
+  height: 180px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, rgba(94, 234, 212, 0.5), rgba(129, 140, 248, 0.25));
+  box-shadow: 0 0 60px rgba(94, 234, 212, 0.35);
+  transform: scale(0.55);
+  will-change: transform;
+}
+
+.breath-text {
+  color: var(--ink);
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.breath-skip {
+  position: absolute;
+  bottom: calc(28px + env(safe-area-inset-bottom));
+  width: auto;
+  padding: 10px 26px;
+}
+
+/* ---------- Session summary ---------- */
+.sum-stats {
+  margin: 10px 0 6px;
+  text-align: left;
+}
+
+.sum-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 7px 4px;
+  color: var(--dim);
+  font-size: 14.5px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.sum-row strong { color: var(--ink); font-weight: 700; }
 
 /* ---------- HUD ---------- */
 #hud {

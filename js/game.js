@@ -1,6 +1,9 @@
 /**
  * FocusBall — steer a ball with your eyes/head through moving obstacles.
  * Game engine, screens, and input glue. Tracking lives in tracking.js.
+ *
+ * Control is POSITIONAL: your gaze/head offset maps to a spot on screen and
+ * the ball glides toward it — far more intuitive than steering a velocity.
  */
 (function () {
   'use strict';
@@ -19,10 +22,15 @@
     startBtn: document.getElementById('startBtn'),
     startError: document.getElementById('startError'),
     modeSelect: document.getElementById('modeSelect'),
+    diffSelect: document.getElementById('diffSelect'),
     sensitivity: document.getElementById('sensitivity'),
     calib: document.getElementById('calibScreen'),
+    calibTarget: document.getElementById('calibTarget'),
     calibRing: document.getElementById('calibRing'),
     calibStatus: document.getElementById('calibStatus'),
+    countdown: document.getElementById('countdown'),
+    countNum: document.getElementById('countNum'),
+    countHint: document.getElementById('countHint'),
     pause: document.getElementById('pauseScreen'),
     pauseTitle: document.getElementById('pauseTitle'),
     pauseMsg: document.getElementById('pauseMsg'),
@@ -38,6 +46,32 @@
 
   const RING_LEN = 326.7; // circumference of the calibration ring
   const FACE_LOST_PAUSE_MS = 1200;
+  const HUD_CLEAR = 58;   // keep the ball below the HUD
+
+  // Difficulty presets — Gentle is deliberately slow and forgiving.
+  const DIFFICULTY = {
+    gentle: {
+      base: 70, ramp: 2.6, max: 165, spawnMul: 1.65, gapFrac: 0.36,
+      lives: 5, blockSpd: [1.05, 1.22], driftAmp: [35, 80],
+    },
+    normal: {
+      base: 100, ramp: 4.2, max: 235, spawnMul: 1.3, gapFrac: 0.31,
+      lives: 3, blockSpd: [1.1, 1.32], driftAmp: [45, 105],
+    },
+    swift: {
+      base: 140, ramp: 6.5, max: 320, spawnMul: 1.0, gapFrac: 0.27,
+      lives: 3, blockSpd: [1.15, 1.5], driftAmp: [60, 140],
+    },
+  };
+
+  // Calibration dots as fractions of the viewport.
+  const CAL_POINTS = [
+    { key: 'center', x: 0.5, y: 0.5, label: 'Look at the dot' },
+    { key: 'left', x: 0.1, y: 0.5, label: 'Follow it left…' },
+    { key: 'right', x: 0.9, y: 0.5, label: 'Now right…' },
+    { key: 'up', x: 0.5, y: 0.16, label: 'Up…' },
+    { key: 'down', x: 0.5, y: 0.84, label: 'And down…' },
+  ];
 
   let W = 0, H = 0, DPR = 1;
 
@@ -58,6 +92,8 @@
 
   // ------------------------------------------------------------- input state
 
+  // Keyboard steers a virtual control point so it behaves like the tracker.
+  const kb = { x: 0, y: 0 };
   const keys = new Set();
   window.addEventListener('keydown', (e) => {
     keys.add(e.key);
@@ -77,32 +113,54 @@
   }, { passive: true });
   canvas.addEventListener('touchend', () => { touch.active = false; }, { passive: true });
 
-  /** Control vector in [-1,1]² from whichever input source is active. */
-  function readControl() {
-    if (game.mode !== 'touch' && tracker.isCalibrated) {
-      return { x: tracker.control.x, y: tracker.control.y };
-    }
-    let x = 0, y = 0;
-    if (keys.has('ArrowLeft') || keys.has('a')) x -= 1;
-    if (keys.has('ArrowRight') || keys.has('d')) x += 1;
-    if (keys.has('ArrowUp') || keys.has('w')) y -= 1;
-    if (keys.has('ArrowDown') || keys.has('s')) y += 1;
+  /**
+   * Where the ball should head, in screen pixels.
+   * Tracker/keyboard control maps [-1,1]² onto the playfield; touch aims
+   * slightly above the finger so it doesn't hide the ball.
+   */
+  function readTarget(dt) {
+    const r = game.ball.r;
+    const cxMin = r + 6, cxMax = W - r - 6;
+    const cyMin = HUD_CLEAR + r, cyMax = H - r - 6;
+
     if (touch.active) {
-      x = clamp((touch.x - game.ball.x) / 80, -1, 1);
-      y = clamp((touch.y - game.ball.y) / 80, -1, 1);
+      return {
+        x: clamp(touch.x, cxMin, cxMax),
+        y: clamp(touch.y - 60, cyMin, cyMax),
+      };
     }
-    return { x, y };
+
+    let c;
+    if (game.mode !== 'touch' && tracker.isCalibrated) {
+      c = tracker.control;
+    } else {
+      let dx = 0, dy = 0;
+      if (keys.has('ArrowLeft') || keys.has('a')) dx -= 1;
+      if (keys.has('ArrowRight') || keys.has('d')) dx += 1;
+      if (keys.has('ArrowUp') || keys.has('w')) dy -= 1;
+      if (keys.has('ArrowDown') || keys.has('s')) dy += 1;
+      kb.x = clamp(kb.x + dx * dt * 2.2, -1, 1);
+      kb.y = clamp(kb.y + dy * dt * 2.2, -1, 1);
+      c = kb;
+    }
+
+    return {
+      x: (cxMin + cxMax) / 2 + c.x * (cxMax - cxMin) / 2,
+      y: (cyMin + cyMax) / 2 + c.y * (cyMax - cyMin) / 2,
+    };
   }
 
   // --------------------------------------------------------------- game state
 
-  let state = 'menu'; // menu | calibrating | playing | paused | facelost | over
+  let state = 'menu'; // menu | calibrating | countdown | playing | paused | over
   let lastTime = 0;
+  let countdownT = 0;
   let best = 0;
   try { best = Number(localStorage.getItem('focusball.best')) || 0; } catch (e) { /* private mode */ }
 
   const game = {
     mode: 'both',
+    diff: DIFFICULTY.gentle,
     ball: { x: 0, y: 0, vx: 0, vy: 0, r: 16 },
     obstacles: [],
     orbs: [],
@@ -110,12 +168,12 @@
     stars: [],
     score: 0,
     lives: 3,
-    speed: 150,          // world scroll speed, px/s
+    speed: 100,
     spawnTimer: 0,
     orbTimer: 0,
     invulnUntil: 0,
     time: 0,
-    focusTime: 0,        // seconds since last hit
+    focusTime: 0,
     bestFocusTime: 0,
     multiplier: 1,
   };
@@ -133,8 +191,9 @@
   }
 
   function resetGame() {
-    game.ball.x = W * 0.28;
-    game.ball.y = H * 0.5;
+    const d = game.diff;
+    game.ball.x = W * 0.5;
+    game.ball.y = H * 0.55;
     game.ball.vx = 0;
     game.ball.vy = 0;
     game.ball.r = Math.max(13, Math.min(W, H) * 0.022);
@@ -142,15 +201,16 @@
     game.orbs = [];
     game.particles = [];
     game.score = 0;
-    game.lives = 3;
-    game.speed = 150;
-    game.spawnTimer = 1.2;
-    game.orbTimer = 2.5;
+    game.lives = d.lives;
+    game.speed = d.base;
+    game.spawnTimer = 2.2;      // grace period before the first obstacle
+    game.orbTimer = 3;
     game.invulnUntil = 0;
     game.time = 0;
     game.focusTime = 0;
     game.bestFocusTime = 0;
     game.multiplier = 1;
+    kb.x = 0; kb.y = 0;
     makeStars();
     updateHud();
   }
@@ -158,12 +218,13 @@
   // ---------------------------------------------------------------- obstacles
 
   function spawnObstacle() {
+    const d = game.diff;
     const kind = Math.random();
     const speed = game.speed;
 
     if (kind < 0.4) {
       // Wall with a gap — forces vertical navigation.
-      const gap = Math.max(H * 0.24, game.ball.r * 7);
+      const gap = Math.max(H * d.gapFrac, game.ball.r * 8);
       const gapY = rand(H * 0.12, H * 0.88 - gap);
       const w = rand(34, 54);
       game.obstacles.push(
@@ -172,24 +233,24 @@
       );
     } else if (kind < 0.7) {
       // Free-floating block, slightly faster — forces horizontal timing.
-      const s = rand(40, 80);
+      const s = rand(40, 76);
       game.obstacles.push({
         x: W + s,
         y: rand(H * 0.1, H * 0.9 - s),
         w: s, h: s,
-        vx: -speed * rand(1.15, 1.5), vy: 0,
+        vx: -speed * rand(d.blockSpd[0], d.blockSpd[1]), vy: 0,
         kind: 'block',
       });
     } else {
       // Drifter — moves up/down while scrolling, forces diagonal dodges.
-      const s = rand(36, 64);
+      const s = rand(36, 60);
       game.obstacles.push({
         x: W + s,
         y: rand(H * 0.2, H * 0.8 - s),
         w: s, h: s,
         vx: -speed * 1.05,
         vy: 0,
-        drift: rand(60, 140) * (Math.random() < 0.5 ? -1 : 1),
+        drift: rand(d.driftAmp[0], d.driftAmp[1]) * (Math.random() < 0.5 ? -1 : 1),
         phase: Math.random() * Math.PI * 2,
         kind: 'drifter',
       });
@@ -209,6 +270,7 @@
   // ------------------------------------------------------------------ update
 
   function update(dt) {
+    const d = game.diff;
     game.time += dt;
     game.focusTime += dt;
     game.bestFocusTime = Math.max(game.bestFocusTime, game.focusTime);
@@ -216,26 +278,20 @@
     // focus multiplier grows the longer you fly clean
     game.multiplier = 1 + Math.min(4, Math.floor(game.focusTime / 10));
 
-    // difficulty ramp
-    game.speed = 150 + Math.min(260, game.time * 6);
+    // gentle difficulty ramp
+    game.speed = Math.min(d.max, d.base + game.time * d.ramp);
 
-    // ball physics: control sets target velocity, eased for weight
-    const c = readControl();
-    const maxSpeed = Math.min(W, H) * 0.85;
-    game.ball.vx += (c.x * maxSpeed - game.ball.vx) * Math.min(1, dt * 6);
-    game.ball.vy += (c.y * maxSpeed - game.ball.vy) * Math.min(1, dt * 6);
-    game.ball.x += game.ball.vx * dt;
-    game.ball.y += game.ball.vy * dt;
+    // ball glides toward wherever you're looking/pointing
+    const target = readTarget(dt);
+    const ease = Math.min(1, dt * 7);
+    game.ball.x += (target.x - game.ball.x) * ease;
+    game.ball.y += (target.y - game.ball.y) * ease;
 
-    const r = game.ball.r;
-    game.ball.x = clamp(game.ball.x, r, W - r);
-    game.ball.y = clamp(game.ball.y, r + 54, H - r); // keep clear of the HUD
-
-    // spawn cadence tightens as speed rises
+    // spawn cadence tightens slowly as speed rises
     game.spawnTimer -= dt;
     if (game.spawnTimer <= 0) {
       spawnObstacle();
-      game.spawnTimer = rand(0.9, 1.6) * (150 / game.speed) + 0.35;
+      game.spawnTimer = rand(1.15, 1.85) * d.spawnMul * clamp(d.base / game.speed, 0.55, 1) + 0.4;
     }
     game.orbTimer -= dt;
     if (game.orbTimer <= 0) {
@@ -247,7 +303,7 @@
     for (const o of game.obstacles) {
       o.x += o.vx * dt;
       if (o.kind === 'drifter') {
-        o.phase += dt * 2;
+        o.phase += dt * 1.6;
         o.y += Math.sin(o.phase) * o.drift * dt;
         o.y = clamp(o.y, 0, H - o.h);
       }
@@ -313,7 +369,7 @@
 
   function hitObstacle() {
     game.lives -= 1;
-    game.invulnUntil = performance.now() + 1600;
+    game.invulnUntil = performance.now() + 1800;
     game.focusTime = 0;
     burst(game.ball.x, game.ball.y, '#fb7185', 22);
     if (navigator.vibrate) navigator.vibrate(80);
@@ -338,7 +394,6 @@
   // ------------------------------------------------------------------ render
 
   function render() {
-    // background
     const grad = ctx.createLinearGradient(0, 0, 0, H);
     grad.addColorStop(0, '#0d1330');
     grad.addColorStop(1, '#0b1020');
@@ -354,7 +409,6 @@
     }
     ctx.globalAlpha = 1;
 
-    // orbs
     for (const orb of game.orbs) {
       const y = orb.y + Math.sin(orb.phase) * 6;
       ctx.save();
@@ -367,7 +421,6 @@
       ctx.restore();
     }
 
-    // obstacles
     for (const o of game.obstacles) {
       const isWall = o.kind === 'wall';
       ctx.save();
@@ -379,7 +432,6 @@
       ctx.restore();
     }
 
-    // particles
     for (const p of game.particles) {
       ctx.globalAlpha = Math.max(0, p.life / 0.7);
       ctx.fillStyle = p.color;
@@ -427,6 +479,23 @@
     if (state === 'playing') {
       update(dt);
       render();
+    } else if (state === 'countdown') {
+      // let the ball follow the player's eyes during the countdown so they
+      // learn the control before anything can hurt them
+      const target = readTarget(dt);
+      const ease = Math.min(1, dt * 7);
+      game.ball.x += (target.x - game.ball.x) * ease;
+      game.ball.y += (target.y - game.ball.y) * ease;
+      render();
+
+      countdownT -= dt;
+      const n = Math.ceil(Math.max(0, countdownT));
+      ui.countNum.textContent = n > 0 ? n : 'Go!';
+      if (countdownT <= -0.5) {
+        hide(ui.countdown);
+        lastTime = t;
+        state = 'playing';
+      }
     }
     requestAnimationFrame(frame);
   }
@@ -452,6 +521,7 @@
 
   async function startFlow() {
     game.mode = ui.modeSelect.value;
+    game.diff = DIFFICULTY[ui.diffSelect.value] || DIFFICULTY.gentle;
     tracker.mode = game.mode === 'touch' ? 'both' : game.mode;
     tracker.sensitivity = Number(ui.sensitivity.value);
     hide(ui.startError);
@@ -480,32 +550,45 @@
     runCalibration();
   }
 
+  function placeCalDot(p) {
+    ui.calibTarget.style.left = `${p.x * 100}%`;
+    ui.calibTarget.style.top = `${p.y * 100}%`;
+  }
+
   async function runCalibration() {
+    state = 'calibrating';
     ui.calibRing.style.strokeDashoffset = RING_LEN;
     ui.calibStatus.textContent = 'Looking for your face…';
+    placeCalDot(CAL_POINTS[0]);
 
-    // wait until the face is actually visible before sampling
     const seen = await waitFor(() => tracker.faceVisible, 15000);
     if (!seen) {
       calibrationFailed('No face detected. Check lighting and that the camera isn’t covered.');
       return;
     }
 
-    ui.calibStatus.textContent = 'Hold still and look at the dot…';
+    const points = {};
     try {
-      await tracker.calibrate(2500, (t) => {
-        ui.calibRing.style.strokeDashoffset = RING_LEN * (1 - t);
-      });
+      for (const p of CAL_POINTS) {
+        ui.calibStatus.textContent = p.label;
+        placeCalDot(p);
+        await delay(700); // let the dot glide over and the eyes settle
+        ui.calibRing.style.strokeDashoffset = RING_LEN;
+        points[p.key] = await tracker.samplePoint(1300, (t) => {
+          ui.calibRing.style.strokeDashoffset = RING_LEN * (1 - t);
+        });
+      }
     } catch (err) {
       calibrationFailed(err.message);
       return;
     }
 
+    tracker.setCalibration(points);
     ui.calibStatus.textContent = 'Calibrated ✓';
     setTimeout(() => {
       hide(ui.calib);
       beginPlay();
-    }, 500);
+    }, 450);
   }
 
   function calibrationFailed(msg) {
@@ -514,6 +597,7 @@
     ui.startError.textContent = msg;
     show(ui.startError);
     tracker.stop();
+    state = 'menu';
   }
 
   function beginPlay() {
@@ -523,7 +607,16 @@
     hide(ui.pause);
     show(ui.hud);
     ui.trackDot.classList.toggle('ok', game.mode === 'touch' || tracker.faceVisible);
-    state = 'playing';
+    startCountdown('The ball follows your gaze — try it!');
+  }
+
+  function startCountdown(hint) {
+    countdownT = 3;
+    ui.countNum.textContent = '3';
+    ui.countHint.textContent = hint || '';
+    show(ui.countdown);
+    lastTime = performance.now();
+    state = 'countdown';
   }
 
   function pauseGame(title, msg) {
@@ -536,8 +629,7 @@
 
   function resumeGame() {
     hide(ui.pause);
-    lastTime = performance.now();
-    state = 'playing';
+    startCountdown('');
   }
 
   function endGame() {
@@ -566,6 +658,7 @@
     hide(ui.pause);
     hide(ui.over);
     hide(ui.hud);
+    hide(ui.countdown);
     show(ui.start);
   }
 
@@ -600,6 +693,8 @@
     return (err && err.message) || 'Could not start the camera. Try Touch / Keyboard mode.';
   }
 
+  function delay(ms) { return new Promise((res) => setTimeout(res, ms)); }
+
   function waitFor(cond, timeoutMs) {
     return new Promise((resolve) => {
       const t0 = performance.now();
@@ -616,7 +711,7 @@
     const dx = ball.x - cx;
     const dy = ball.y - cy;
     // shrink the hitbox slightly so grazing feels fair
-    return dx * dx + dy * dy < (ball.r * 0.85) * (ball.r * 0.85);
+    return dx * dx + dy * dy < (ball.r * 0.82) * (ball.r * 0.82);
   }
 
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }

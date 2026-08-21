@@ -7,8 +7,11 @@ A web game that you steer **with your eyes and head**. Guide the glowing ball up
 iPhones don't expose the Face ID / TrueDepth sensor to web pages, so the game uses the next best thing: the **front camera + [MediaPipe Face Mesh](https://developers.google.com/mediapipe)** running entirely in your browser. It tracks 478 face landmarks (including your irises) every frame and converts your head turn and gaze direction into ball movement.
 
 - **All processing happens on-device.** No video is recorded or uploaded anywhere.
-- A short calibration captures your neutral pose; the ball then follows your offset from it.
-- If your face leaves the frame, the game auto-pauses.
+- A 5-point calibration (follow the dot to center/left/right/up/down) learns your personal range of motion per direction, so the mapping fits you rather than an assumed average.
+- Control is **positional**: your gaze/head offset maps to a spot on screen and the ball glides there — look left, ball is left.
+- Blinks are detected from eyelid openness and gaze is held through them (iris landmarks go haywire mid-blink).
+- A One Euro filter smooths jitter adaptively: steady when you're still, low-latency when you move.
+- If your face leaves the frame, the game auto-pauses; resuming gives a 3-2-1 countdown.
 
 ## Playing
 
@@ -18,8 +21,9 @@ iPhones don't expose the Face ID / TrueDepth sensor to web pages, so the game us
    - **Head only** — steer by turning/tilting your head
    - **Eyes only** — steer by looking around (needs good lighting)
    - **Touch / Keyboard** — fallback: drag on screen or use WASD/arrow keys
-3. Allow camera access, look at the dot until the calibration ring closes, and play.
-4. Dodge the walls, blocks, and drifters; collect teal orbs for bonus points.
+3. Pick a pace: **Gentle** (slow, 5 lives — the default), **Normal**, or **Swift**.
+4. Allow camera access and follow the calibration dot to all five positions.
+5. Dodge the walls, blocks, and drifters; collect teal orbs for bonus points.
 
 **Tips:** sit in even lighting, keep the phone roughly at eye level, and use the sensitivity slider if the ball feels too sluggish or too twitchy.
 

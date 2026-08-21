@@ -2,13 +2,20 @@
  * FaceControl — turns front-camera face/eye tracking into a 2D control vector.
  *
  * Uses MediaPipe Face Mesh (with iris refinement) running entirely on-device.
- * Two signals are extracted per frame and blended:
+ * Two signals are extracted per frame and blended by mode:
  *   - HEAD: nose position relative to the eye line, normalized by inter-ocular
  *     distance (scale/distance invariant) → captures head yaw/pitch.
- *   - EYES: iris center offset inside each eye box → captures gaze direction.
+ *   - EYES: iris center offset inside each eye, normalized by eye WIDTH on
+ *     both axes (eye height changes with eyelid openness, which made vertical
+ *     gaze unstable) → captures gaze direction.
  *
- * A short calibration captures the user's neutral pose; afterwards
- * `control` is the smoothed, deadzoned offset from neutral in [-1, 1].
+ * The blended signal is calibrated with FIVE points (center + the four screen
+ * edges), so each user's real range of motion per direction is learned rather
+ * than assumed. Output is filtered with a One Euro filter — heavy smoothing
+ * when still, low latency when moving — and `control` ends up in [-1, 1]².
+ *
+ * Blinks are detected from eyelid openness and gaze is held through them,
+ * because iris landmarks spike wildly while the eye is closed.
  */
 (function () {
   'use strict';
@@ -21,21 +28,77 @@
   const L_EYE_TOP = 386, L_EYE_BOT = 374;
   const R_IRIS = 468, L_IRIS = 473; // iris centers (refineLandmarks: true)
 
+  // Eyelid openness (height/width) below this counts as a blink.
+  const BLINK_OPENNESS = 0.16;
+  // Comfortable full deflections used to pre-scale head/gaze into ~[-1, 1]
+  // before blending, so the two signals mix in comparable units.
+  const HEAD_X_RANGE = 0.25, HEAD_Y_RANGE = 0.18;
+  const GAZE_X_RANGE = 0.14, GAZE_Y_RANGE = 0.10;
+  // A calibration extent smaller than this amplifies noise too much — clamp.
+  const MIN_EXTENT = 0.14;
+
+  // ---------------------------------------------------------- One Euro filter
+
+  class LowPass {
+    constructor() { this.y = null; }
+    filter(v, a) {
+      this.y = this.y === null ? v : a * v + (1 - a) * this.y;
+      return this.y;
+    }
+  }
+
+  class OneEuro {
+    constructor(minCutoff = 0.9, beta = 0.5, dCutoff = 1.0) {
+      this.minCutoff = minCutoff;
+      this.beta = beta;
+      this.dCutoff = dCutoff;
+      this.x = new LowPass();
+      this.dx = new LowPass();
+      this.lastT = null;
+    }
+    _alpha(cutoff, dt) {
+      const tau = 1 / (2 * Math.PI * cutoff);
+      return 1 / (1 + tau / dt);
+    }
+    filter(v, t) {
+      if (this.lastT === null) {
+        this.lastT = t;
+        this.dx.filter(0, 1);
+        return this.x.filter(v, 1);
+      }
+      const dt = Math.max(1e-3, t - this.lastT);
+      this.lastT = t;
+      const dv = (v - this.x.y) / dt;
+      const edv = this.dx.filter(dv, this._alpha(this.dCutoff, dt));
+      const cutoff = this.minCutoff + this.beta * Math.abs(edv);
+      return this.x.filter(v, this._alpha(cutoff, dt));
+    }
+    reset() {
+      this.x = new LowPass();
+      this.dx = new LowPass();
+      this.lastT = null;
+    }
+  }
+
+  // -------------------------------------------------------------- FaceControl
+
   class FaceControl {
     constructor(videoEl) {
       this.video = videoEl;
       this.mode = 'both';        // 'head' | 'eyes' | 'both'
-      this.sensitivity = 1.5;
-      this.smoothing = 0.35;     // EMA factor per frame (higher = snappier)
-      this.deadzone = 0.06;
+      this.sensitivity = 1.0;    // scales calibrated control
+      this.deadzone = 0.04;
 
       this.faceVisible = false;
       this.lastFaceTime = 0;
-      this.control = { x: 0, y: 0 };   // smoothed output in [-1, 1]
+      this.control = { x: 0, y: 0 };   // filtered output in [-1, 1]
 
-      this._raw = null;                // latest raw measurement
-      this._neutral = null;            // calibrated neutral pose
-      this._calibSamples = null;
+      this._cal = null;          // {nx, ny, xLo, xHi, yLo, yHi} in raw units
+      this._sampler = null;      // active calibration-point sampler
+      this._lastGaze = null;     // gaze held through blinks
+      this._rawC = { x: 0, y: 0 };
+      this._fx = new OneEuro();
+      this._fy = new OneEuro();
       this._faceMesh = null;
       this._camera = null;
       this._running = false;
@@ -83,99 +146,123 @@
         this.video.srcObject = null;
       }
       this._camera = null;
+      this._cal = null;
+      this._lastGaze = null;
     }
 
-    /**
-     * Capture the user's neutral pose over `durationMs`.
-     * `onProgress(0..1)` drives the calibration UI.
-     * Resolves once enough samples are collected; rejects on timeout.
-     */
-    calibrate(durationMs = 2500, onProgress = null) {
-      return new Promise((resolve, reject) => {
-        const samples = [];
-        const started = performance.now();
-        const minSamples = 12;
+    get isCalibrated() { return this._cal !== null; }
 
-        this._calibSamples = {
-          push: (raw) => {
-            samples.push(raw);
-            const t = Math.min(1, (performance.now() - started) / durationMs);
-            if (onProgress) onProgress(t);
-            if (t >= 1 && samples.length >= minSamples) {
-              this._calibSamples = null;
-              this._neutral = averageRaw(samples);
-              this.control = { x: 0, y: 0 };
-              resolve();
-            }
-          },
+    /**
+     * Average the blended raw signal for `durationMs` while the user stares at
+     * one calibration dot. `onProgress(0..1)` drives the ring UI.
+     * Rejects if the face can't be seen steadily.
+     */
+    samplePoint(durationMs = 1300, onProgress = null) {
+      return new Promise((resolve, reject) => {
+        const xs = [], ys = [];
+        const started = performance.now();
+        const minSamples = 8;
+
+        this._sampler = (raw) => {
+          xs.push(raw.x);
+          ys.push(raw.y);
+          const t = Math.min(1, (performance.now() - started) / durationMs);
+          if (onProgress) onProgress(t);
+          if (t >= 1 && xs.length >= minSamples) {
+            this._sampler = null;
+            resolve({ x: avg(xs), y: avg(ys) });
+          }
         };
 
         const guard = setInterval(() => {
-          if (!this._calibSamples) { clearInterval(guard); return; }
-          if (performance.now() - started > durationMs + 8000) {
+          if (!this._sampler) { clearInterval(guard); return; }
+          if (performance.now() - started > durationMs + 6000) {
             clearInterval(guard);
-            this._calibSamples = null;
+            this._sampler = null;
             reject(new Error('Could not see your face steadily. Find better lighting and try again.'));
           }
-        }, 500);
+        }, 400);
       });
     }
 
-    get isCalibrated() { return this._neutral !== null; }
+    /**
+     * Install a 5-point calibration. `points` maps screen positions to the
+     * raw signal sampled there: {center, left, right, up, down}.
+     * left/right/up/down refer to dots at those SCREEN edges, so the mapping
+     * learns each user's direction and range — including the camera mirror
+     * flip — with no hardcoded signs.
+     */
+    setCalibration(points) {
+      const nx = points.center.x, ny = points.center.y;
+      this._cal = {
+        nx, ny,
+        ...calAxis(nx, points.left.x, points.right.x),
+        ...calAxisY(ny, points.up.y, points.down.y),
+      };
+      this.control = { x: 0, y: 0 };
+      this._fx.reset();
+      this._fy.reset();
+    }
+
+    _weights() {
+      if (this.mode === 'head') return { h: 1, g: 0, hy: 1, gy: 0 };
+      if (this.mode === 'eyes') return { h: 0, g: 1, hy: 0, gy: 1 };
+      // Vertical gaze is the weakest signal, so lean harder on head pitch.
+      return { h: 0.6, g: 0.4, hy: 0.72, gy: 0.28 };
+    }
 
     _onResults(results) {
       const lm = results.multiFaceLandmarks && results.multiFaceLandmarks[0];
       if (!lm) {
         this.faceVisible = false;
-        // decay toward center when the face is lost so the ball doesn't run away
-        this.control.x *= 0.9;
-        this.control.y *= 0.9;
+        // decay toward center when the face is lost so the ball settles
+        this.control.x *= 0.92;
+        this.control.y *= 0.92;
         return;
       }
 
       this.faceVisible = true;
       this.lastFaceTime = performance.now();
 
-      const raw = measure(lm);
-      this._raw = raw;
+      const m = measure(lm);
 
-      if (this._calibSamples) {
-        this._calibSamples.push(raw);
+      // Hold the previous gaze through blinks — iris landmarks are garbage
+      // while the eye is closed and would fling the ball around.
+      let gaze;
+      if (m.openness < BLINK_OPENNESS && this._lastGaze) {
+        gaze = this._lastGaze;
+      } else {
+        gaze = { x: m.gazeX, y: m.gazeY };
+        this._lastGaze = gaze;
+      }
+
+      // Blend head + gaze in comparable pre-scaled units.
+      const w = this._weights();
+      this._rawC = {
+        x: w.h * (m.headX / HEAD_X_RANGE) + w.g * (gaze.x / GAZE_X_RANGE),
+        y: w.hy * (m.headY / HEAD_Y_RANGE) + w.gy * (gaze.y / GAZE_Y_RANGE),
+      };
+
+      if (this._sampler) {
+        this._sampler(this._rawC);
         return;
       }
-      if (!this._neutral) return;
+      if (!this._cal) return;
 
-      const n = this._neutral;
-
-      // Head offset from neutral. Yaw ≈ 0.25 units of eye-distance for a
-      // comfortable turn, pitch is smaller, so scale to feel symmetric.
-      const headX = (raw.headX - n.headX) / 0.25;
-      const headY = (raw.headY - n.headY) / 0.18;
-
-      // Gaze offset from neutral. Iris travel inside the eye box is tiny
-      // (~0.15 of eye width horizontally, less vertically).
-      const gazeX = (raw.gazeX - n.gazeX) / 0.15;
-      const gazeY = (raw.gazeY - n.gazeY) / 0.22;
-
-      let cx, cy;
-      if (this.mode === 'head') { cx = headX; cy = headY; }
-      else if (this.mode === 'eyes') { cx = gazeX; cy = gazeY; }
-      else { cx = headX * 0.65 + gazeX * 0.35; cy = headY * 0.65 + gazeY * 0.35; }
-
-      // The camera image is unmirrored: moving/looking to the user's right
-      // moves features toward image-left, so flip X for natural control.
-      cx = -cx * this.sensitivity;
-      cy = cy * this.sensitivity;
+      const c = this._cal;
+      let cx = mapAxis(this._rawC.x, c.nx, c.xLo, c.xHi) * this.sensitivity;
+      let cy = mapAxis(this._rawC.y, c.ny, c.yLo, c.yHi) * this.sensitivity;
 
       cx = applyDeadzone(clamp(cx, -1, 1), this.deadzone);
       cy = applyDeadzone(clamp(cy, -1, 1), this.deadzone);
 
-      // Exponential smoothing to kill landmark jitter.
-      const a = this.smoothing;
-      this.control.x += (cx - this.control.x) * a;
-      this.control.y += (cy - this.control.y) * a;
+      const t = performance.now() / 1000;
+      this.control.x = clamp(this._fx.filter(cx, t), -1, 1);
+      this.control.y = clamp(this._fy.filter(cy, t), -1, 1);
     }
   }
+
+  // ------------------------------------------------------------ measurements
 
   /** Extract normalized head + gaze measurements from one landmark frame. */
   function measure(lm) {
@@ -191,37 +278,74 @@
     const headX = (nose.x - eyeMidX) / eyeDist;
     const headY = (nose.y - eyeMidY) / eyeDist;
 
-    // Gaze: iris center within each eye's bounding box, averaged over both eyes.
     const rIris = lm[R_IRIS], lIris = lm[L_IRIS];
     const rTop = lm[R_EYE_TOP], rBot = lm[R_EYE_BOT];
     const lTop = lm[L_EYE_TOP], lBot = lm[L_EYE_BOT];
 
     const rW = Math.hypot(rInner.x - rOuter.x, rInner.y - rOuter.y) || 1e-6;
     const lW = Math.hypot(lOuter.x - lInner.x, lOuter.y - lInner.y) || 1e-6;
-    const rH = Math.abs(rBot.y - rTop.y) || 1e-6;
-    const lH = Math.abs(lBot.y - lTop.y) || 1e-6;
+    const rH = Math.hypot(rBot.x - rTop.x, rBot.y - rTop.y);
+    const lH = Math.hypot(lBot.x - lTop.x, lBot.y - lTop.y);
 
+    // Iris offset from the eye-corner midpoint. Both axes are normalized by
+    // eye WIDTH: height shrinks whenever the lids move, which used to bleed
+    // eyelid motion into vertical gaze.
     const rGx = (rIris.x - (rOuter.x + rInner.x) / 2) / rW;
     const lGx = (lIris.x - (lInner.x + lOuter.x) / 2) / lW;
-    const rGy = (rIris.y - (rTop.y + rBot.y) / 2) / rH;
-    const lGy = (lIris.y - (lTop.y + lBot.y) / 2) / lH;
+    const rGy = (rIris.y - (rTop.y + rBot.y) / 2) / rW;
+    const lGy = (lIris.y - (lTop.y + lBot.y) / 2) / lW;
 
     return {
       headX, headY,
       gazeX: (rGx + lGx) / 2,
       gazeY: (rGy + lGy) / 2,
+      openness: (rH / rW + lH / lW) / 2,
     };
   }
 
-  function averageRaw(samples) {
-    const sum = { headX: 0, headY: 0, gazeX: 0, gazeY: 0 };
-    for (const s of samples) {
-      sum.headX += s.headX; sum.headY += s.headY;
-      sum.gazeX += s.gazeX; sum.gazeY += s.gazeY;
+  // ------------------------------------------------------------- calibration
+
+  /**
+   * Build the x-axis calibration from raw values at the screen-left and
+   * screen-right dots. If the user barely moved (or moved the same way for
+   * both dots), fall back to the default mirrored mapping.
+   */
+  function calAxis(n, rawAtLeft, rawAtRight) {
+    let lo = rawAtLeft - n, hi = rawAtRight - n; // lo → control -1, hi → +1
+    const valid = lo * hi < 0 && Math.abs(lo) > 0.03 && Math.abs(hi) > 0.03;
+    if (!valid) {
+      // camera is unmirrored: user-right = image-left = raw negative
+      return { xLo: n + 1, xHi: n - 1 };
     }
-    const k = samples.length;
-    return { headX: sum.headX / k, headY: sum.headY / k, gazeX: sum.gazeX / k, gazeY: sum.gazeY / k };
+    lo = Math.sign(lo) * Math.max(MIN_EXTENT, Math.abs(lo));
+    hi = Math.sign(hi) * Math.max(MIN_EXTENT, Math.abs(hi));
+    return { xLo: n + lo, xHi: n + hi };
   }
+
+  function calAxisY(n, rawAtUp, rawAtDown) {
+    let lo = rawAtUp - n, hi = rawAtDown - n; // up → control -1, down → +1
+    const valid = lo * hi < 0 && Math.abs(lo) > 0.03 && Math.abs(hi) > 0.03;
+    if (!valid) {
+      // image y grows downward, same as screen y — no flip
+      return { yLo: n - 1, yHi: n + 1 };
+    }
+    lo = Math.sign(lo) * Math.max(MIN_EXTENT, Math.abs(lo));
+    hi = Math.sign(hi) * Math.max(MIN_EXTENT, Math.abs(hi));
+    return { yLo: n + lo, yHi: n + hi };
+  }
+
+  /** Piecewise-linear map: raw value → [-1, 1] using per-side calibrated extents. */
+  function mapAxis(v, n, lo, hi) {
+    const d = v - n;
+    const dHi = hi - n, dLo = lo - n;
+    if (d === 0 || dHi === 0 || dLo === 0) return 0;
+    if (Math.sign(d) === Math.sign(dHi)) return clamp(d / dHi, 0, 1.35);
+    return -clamp(d / dLo, 0, 1.35);
+  }
+
+  // ----------------------------------------------------------------- helpers
+
+  function avg(arr) { return arr.reduce((a, b) => a + b, 0) / arr.length; }
 
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 

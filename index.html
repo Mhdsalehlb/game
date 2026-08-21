@@ -48,8 +48,16 @@
           </select>
         </label>
         <label class="setting">
+          <span>Pace</span>
+          <select id="diffSelect">
+            <option value="gentle" selected>Gentle</option>
+            <option value="normal">Normal</option>
+            <option value="swift">Swift</option>
+          </select>
+        </label>
+        <label class="setting">
           <span>Sensitivity</span>
-          <input id="sensitivity" type="range" min="0.5" max="3" step="0.1" value="1.5" />
+          <input id="sensitivity" type="range" min="0.6" max="1.8" step="0.05" value="1" />
         </label>
       </div>
 
@@ -60,14 +68,14 @@
     </div>
   </div>
 
-  <!-- Calibration screen -->
+  <!-- Calibration screen: the dot glides to 5 positions to learn your range -->
   <div id="calibScreen" class="screen hidden">
     <div class="calib-instructions">
       <h2>Calibration</h2>
       <p>Hold your phone at a comfortable distance.<br/>
-        Relax, and look at the dot until the ring closes.</p>
+        Keep your head relaxed and follow the dot with your eyes.</p>
     </div>
-    <div class="calib-target">
+    <div id="calibTarget" class="calib-target">
       <svg viewBox="0 0 120 120" width="120" height="120">
         <circle class="calib-ring-bg" cx="60" cy="60" r="52" />
         <circle id="calibRing" class="calib-ring" cx="60" cy="60" r="52" />
@@ -75,6 +83,12 @@
       <div class="calib-dot"></div>
     </div>
     <p id="calibStatus" class="calib-status">Looking for your face…</p>
+  </div>
+
+  <!-- Countdown overlay -->
+  <div id="countdown" class="countdown hidden">
+    <div id="countNum" class="count-num">3</div>
+    <div id="countHint" class="count-hint"></div>
   </div>
 
   <!-- Pause overlay -->

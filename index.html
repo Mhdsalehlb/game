@@ -23,7 +23,7 @@
       <div id="streak" class="hud-pill streak hidden">FOCUS ×1</div>
     </div>
     <div class="hud-right">
-      <div id="lives" class="hud-pill">❤️❤️❤️</div>
+      <div id="levelPill" class="hud-pill">✦ L1</div>
       <div id="trackDot" class="track-dot" title="Tracking status"></div>
       <button id="pauseBtn" class="icon-btn" aria-label="Pause">⏸</button>
     </div>
@@ -34,8 +34,9 @@
     <div class="panel">
       <div class="logo">👁️</div>
       <h1>FocusBall</h1>
-      <p class="tagline">Steer the ball with your eyes and head.<br/>
-        Dodge the obstacles. Rebuild your focus.</p>
+      <p class="tagline">Weave constellations with your eyes.<br/>
+        Rest your gaze on a star to light it.<br/>
+        Slow down. Rebuild your focus.</p>
 
       <div class="settings">
         <label class="setting">
@@ -45,14 +46,6 @@
             <option value="head">Head only</option>
             <option value="eyes">Eyes only</option>
             <option value="touch">Touch / Keyboard</option>
-          </select>
-        </label>
-        <label class="setting">
-          <span>Pace</span>
-          <select id="diffSelect">
-            <option value="gentle" selected>Gentle</option>
-            <option value="normal">Normal</option>
-            <option value="swift">Swift</option>
           </select>
         </label>
         <label class="setting">
@@ -85,10 +78,19 @@
     <p id="calibStatus" class="calib-status">Looking for your face…</p>
   </div>
 
-  <!-- Countdown overlay -->
+  <!-- Level card overlay -->
   <div id="countdown" class="countdown hidden">
-    <div id="countNum" class="count-num">3</div>
+    <div id="countNum" class="count-num">Level 1</div>
     <div id="countHint" class="count-hint"></div>
+  </div>
+
+  <!-- Breathing interlude -->
+  <div id="breathScreen" class="screen overlay hidden">
+    <div class="breath-wrap">
+      <div id="breathCircle" class="breath-circle"></div>
+      <p id="breathText" class="breath-text">Breathe in…</p>
+    </div>
+    <button id="breathSkip" class="ghost-btn breath-skip">Skip</button>
   </div>
 
   <!-- Pause overlay -->
@@ -97,18 +99,19 @@
       <h2 id="pauseTitle">Paused</h2>
       <p id="pauseMsg">Take a breath.</p>
       <button id="resumeBtn" class="primary-btn">Resume</button>
-      <button id="quitBtn" class="ghost-btn">Quit to menu</button>
+      <button id="quitBtn" class="ghost-btn">End session</button>
     </div>
   </div>
 
-  <!-- Game over screen -->
+  <!-- Session summary screen -->
   <div id="overScreen" class="screen overlay hidden">
     <div class="panel small">
-      <h2>Session over</h2>
+      <h2>Session complete</h2>
       <div class="final-score"><span id="finalScore">0</span> pts</div>
       <p id="bestScore" class="best"></p>
+      <div id="sumStats" class="sum-stats"></div>
       <p id="focusReport" class="focus-report"></p>
-      <button id="retryBtn" class="primary-btn">Play again</button>
+      <button id="retryBtn" class="primary-btn">Weave again</button>
       <button id="menuBtn" class="ghost-btn">Menu</button>
     </div>
   </div>

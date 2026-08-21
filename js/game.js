@@ -1,9 +1,14 @@
 /**
- * FocusBall — steer a ball with your eyes/head through moving obstacles.
- * Game engine, screens, and input glue. Tracking lives in tracking.js.
+ * FocusBall: Constellation Weaver — a calm focus-training game.
  *
- * Control is POSITIONAL: your gaze/head offset maps to a spot on screen and
- * the ball glides toward it — far more intuitive than steering a velocity.
+ * Rest your gaze on a star to light it; light them all to weave the
+ * constellation. Levels add structure gradually: any order → follow the
+ * glow → numbered order → memory recall → drifting distractor embers.
+ * No lives, no game over — mistakes just soften your streak, and every
+ * third level ends in a guided breathing interlude.
+ *
+ * Control is POSITIONAL (tracking.js): your gaze/head offset maps to a
+ * spot on screen and the orb glides there.
  */
 (function () {
   'use strict';
@@ -15,22 +20,25 @@
     hud: document.getElementById('hud'),
     score: document.getElementById('score'),
     streak: document.getElementById('streak'),
-    lives: document.getElementById('lives'),
+    level: document.getElementById('levelPill'),
     trackDot: document.getElementById('trackDot'),
     pauseBtn: document.getElementById('pauseBtn'),
     start: document.getElementById('startScreen'),
     startBtn: document.getElementById('startBtn'),
     startError: document.getElementById('startError'),
     modeSelect: document.getElementById('modeSelect'),
-    diffSelect: document.getElementById('diffSelect'),
     sensitivity: document.getElementById('sensitivity'),
     calib: document.getElementById('calibScreen'),
     calibTarget: document.getElementById('calibTarget'),
     calibRing: document.getElementById('calibRing'),
     calibStatus: document.getElementById('calibStatus'),
-    countdown: document.getElementById('countdown'),
-    countNum: document.getElementById('countNum'),
-    countHint: document.getElementById('countHint'),
+    card: document.getElementById('countdown'),
+    cardTitle: document.getElementById('countNum'),
+    cardHint: document.getElementById('countHint'),
+    breath: document.getElementById('breathScreen'),
+    breathCircle: document.getElementById('breathCircle'),
+    breathText: document.getElementById('breathText'),
+    breathSkip: document.getElementById('breathSkip'),
     pause: document.getElementById('pauseScreen'),
     pauseTitle: document.getElementById('pauseTitle'),
     pauseMsg: document.getElementById('pauseMsg'),
@@ -39,30 +47,20 @@
     over: document.getElementById('overScreen'),
     finalScore: document.getElementById('finalScore'),
     bestScore: document.getElementById('bestScore'),
+    sumStats: document.getElementById('sumStats'),
     focusReport: document.getElementById('focusReport'),
     retryBtn: document.getElementById('retryBtn'),
     menuBtn: document.getElementById('menuBtn'),
   };
 
-  const RING_LEN = 326.7; // circumference of the calibration ring
+  const RING_LEN = 326.7;
   const FACE_LOST_PAUSE_MS = 1200;
-  const HUD_CLEAR = 58;   // keep the ball below the HUD
+  const HUD_CLEAR = 58;
 
-  // Difficulty presets — Gentle is deliberately slow and forgiving.
-  const DIFFICULTY = {
-    gentle: {
-      base: 70, ramp: 2.6, max: 165, spawnMul: 1.65, gapFrac: 0.36,
-      lives: 5, blockSpd: [1.05, 1.22], driftAmp: [35, 80],
-    },
-    normal: {
-      base: 100, ramp: 4.2, max: 235, spawnMul: 1.3, gapFrac: 0.31,
-      lives: 3, blockSpd: [1.1, 1.32], driftAmp: [45, 105],
-    },
-    swift: {
-      base: 140, ramp: 6.5, max: 320, spawnMul: 1.0, gapFrac: 0.27,
-      lives: 3, blockSpd: [1.15, 1.5], driftAmp: [60, 140],
-    },
-  };
+  const DWELL_STAR = 0.8;    // seconds of steady gaze to light a star
+  const DWELL_DECOY = 0.55;  // seconds on an ember before it counts as a distraction
+  const HOVER_GRACE = 0.2;   // seconds of drift allowed before a dwell resets
+  const STAR_HIT_R = 40;     // generous gaze-target radius around each star
 
   // Calibration dots as fractions of the viewport.
   const CAL_POINTS = [
@@ -72,6 +70,13 @@
     { key: 'up', x: 0.5, y: 0.16, label: 'Up…' },
     { key: 'down', x: 0.5, y: 0.84, label: 'And down…' },
   ];
+
+  const MODE_HINTS = {
+    free: 'Rest your gaze on each star to light it',
+    path: 'Follow the glow from star to star',
+    ordered: 'Light the stars in numbered order',
+    memory: 'Watch the pattern, then repeat it',
+  };
 
   let W = 0, H = 0, DPR = 1;
 
@@ -92,7 +97,6 @@
 
   // ------------------------------------------------------------- input state
 
-  // Keyboard steers a virtual control point so it behaves like the tracker.
   const kb = { x: 0, y: 0 };
   const keys = new Set();
   window.addEventListener('keydown', (e) => {
@@ -113,20 +117,17 @@
   }, { passive: true });
   canvas.addEventListener('touchend', () => { touch.active = false; }, { passive: true });
 
-  /**
-   * Where the ball should head, in screen pixels.
-   * Tracker/keyboard control maps [-1,1]² onto the playfield; touch aims
-   * slightly above the finger so it doesn't hide the ball.
-   */
+  /** Where the gaze orb should glide, in screen pixels. */
   function readTarget(dt) {
-    const r = game.ball.r;
-    const cxMin = r + 6, cxMax = W - r - 6;
-    const cyMin = HUD_CLEAR + r, cyMax = H - r - 6;
+    const r = 12;
+    const cxMin = r + 4, cxMax = W - r - 4;
+    const cyMin = HUD_CLEAR + r, cyMax = H - r - 4;
 
     if (touch.active) {
+      // aim slightly above the finger so it doesn't cover the target
       return {
         x: clamp(touch.x, cxMin, cxMax),
-        y: clamp(touch.y - 60, cyMin, cyMax),
+        y: clamp(touch.y - 50, cyMin, cyMax),
       };
     }
 
@@ -152,207 +153,187 @@
 
   // --------------------------------------------------------------- game state
 
-  let state = 'menu'; // menu | calibrating | countdown | playing | paused | over
+  // menu | calibrating | card | playing | flourish | breathing | paused | summary
+  let state = 'menu';
   let lastTime = 0;
-  let countdownT = 0;
+  let cardT = 0;
+  let flourishT = 0;
+  let breath = { t: 0, phase: '' };
   let best = 0;
   try { best = Number(localStorage.getItem('focusball.best')) || 0; } catch (e) { /* private mode */ }
 
   const game = {
-    mode: 'both',
-    diff: DIFFICULTY.gentle,
-    ball: { x: 0, y: 0, vx: 0, vy: 0, r: 16 },
-    obstacles: [],
-    orbs: [],
-    particles: [],
-    stars: [],
+    mode: 'both',       // control mode
+    level: 1,
+    levelMode: 'free',
     score: 0,
-    lives: 3,
-    speed: 100,
-    spawnTimer: 0,
-    orbTimer: 0,
-    invulnUntil: 0,
-    time: 0,
-    focusTime: 0,
-    bestFocusTime: 0,
-    multiplier: 1,
+    streak: 0,
+    bestStreak: 0,
+    cursor: { x: 0, y: 0 },
+    stars: [],          // {x, y, lit, order, errorT, twinkle}
+    seqIndex: 0,        // next star to light (ordered/path/memory)
+    litCount: 0,
+    phase: 'play',      // 'show' during memory playback, else 'play'
+    showTimer: 0,
+    decoys: [],
+    particles: [],
+    bgStars: [],
+    nebulae: [],
+    dwell: { kind: null, index: -1, t: 0, off: 0 },
+    levelMistakes: 0,
+    stats: { starsLit: 0, mistakes: 0, distractions: 0, levelsDone: 0, startTime: 0 },
   };
 
-  function makeStars() {
-    game.stars = [];
-    for (let i = 0; i < 60; i++) {
-      game.stars.push({
+  // expose for automated smoke tests
+  window.__fb = { game, get state() { return state; } };
+
+  function makeBackground() {
+    game.bgStars = [];
+    for (let i = 0; i < 70; i++) {
+      game.bgStars.push({
         x: Math.random() * W,
         y: Math.random() * H,
-        r: Math.random() * 1.6 + 0.4,
-        depth: Math.random() * 0.6 + 0.2,
+        r: Math.random() * 1.4 + 0.3,
+        tw: Math.random() * Math.PI * 2,
+      });
+    }
+    game.nebulae = [];
+    for (let i = 0; i < 3; i++) {
+      game.nebulae.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        r: Math.min(W, H) * rand(0.35, 0.6),
+        hue: [230, 260, 180][i],
+        drift: rand(2, 5) * (Math.random() < 0.5 ? -1 : 1),
       });
     }
   }
 
-  function resetGame() {
-    const d = game.diff;
-    game.ball.x = W * 0.5;
-    game.ball.y = H * 0.55;
-    game.ball.vx = 0;
-    game.ball.vy = 0;
-    game.ball.r = Math.max(13, Math.min(W, H) * 0.022);
-    game.obstacles = [];
-    game.orbs = [];
-    game.particles = [];
-    game.score = 0;
-    game.lives = d.lives;
-    game.speed = d.base;
-    game.spawnTimer = 2.2;      // grace period before the first obstacle
-    game.orbTimer = 3;
-    game.invulnUntil = 0;
-    game.time = 0;
-    game.focusTime = 0;
-    game.bestFocusTime = 0;
-    game.multiplier = 1;
-    kb.x = 0; kb.y = 0;
-    makeStars();
-    updateHud();
+  // ------------------------------------------------------------ level design
+
+  function levelModeFor(n) {
+    if (n <= 2) return 'free';
+    if (n <= 4) return 'path';
+    if (n <= 6) return 'ordered';
+    return 'memory';
   }
 
-  // ---------------------------------------------------------------- obstacles
+  function makeLevel(n) {
+    game.levelMode = levelModeFor(n);
+    const count = Math.min(8, 3 + Math.floor((n - 1) / 2));
 
-  function spawnObstacle() {
-    const d = game.diff;
-    const kind = Math.random();
-    const speed = game.speed;
-
-    if (kind < 0.4) {
-      // Wall with a gap — forces vertical navigation.
-      const gap = Math.max(H * d.gapFrac, game.ball.r * 8);
-      const gapY = rand(H * 0.12, H * 0.88 - gap);
-      const w = rand(34, 54);
-      game.obstacles.push(
-        { x: W + w, y: 0, w, h: gapY, vx: -speed, vy: 0, kind: 'wall' },
-        { x: W + w, y: gapY + gap, w, h: H - gapY - gap, vx: -speed, vy: 0, kind: 'wall' },
-      );
-    } else if (kind < 0.7) {
-      // Free-floating block, slightly faster — forces horizontal timing.
-      const s = rand(40, 76);
-      game.obstacles.push({
-        x: W + s,
-        y: rand(H * 0.1, H * 0.9 - s),
-        w: s, h: s,
-        vx: -speed * rand(d.blockSpd[0], d.blockSpd[1]), vy: 0,
-        kind: 'block',
-      });
-    } else {
-      // Drifter — moves up/down while scrolling, forces diagonal dodges.
-      const s = rand(36, 60);
-      game.obstacles.push({
-        x: W + s,
-        y: rand(H * 0.2, H * 0.8 - s),
-        w: s, h: s,
-        vx: -speed * 1.05,
-        vy: 0,
-        drift: rand(d.driftAmp[0], d.driftAmp[1]) * (Math.random() < 0.5 ? -1 : 1),
-        phase: Math.random() * Math.PI * 2,
-        kind: 'drifter',
-      });
+    // scatter stars with a minimum spacing, away from edges and the HUD
+    const marginX = W * 0.12;
+    const top = HUD_CLEAR + 70, bottom = H - 60;
+    const minDist = Math.min(W, H) * (count <= 5 ? 0.24 : 0.19);
+    const pts = [];
+    let guard = 400;
+    while (pts.length < count && guard-- > 0) {
+      const p = { x: rand(marginX, W - marginX), y: rand(top, bottom) };
+      if (pts.every((q) => Math.hypot(p.x - q.x, p.y - q.y) > minDist)) pts.push(p);
     }
+    while (pts.length < count) pts.push({ x: rand(marginX, W - marginX), y: rand(top, bottom) });
+
+    // chain stars nearest-neighbor so the constellation reads as a path
+    const order = [0];
+    const left = new Set(pts.map((_, i) => i).slice(1));
+    while (left.size) {
+      const last = pts[order[order.length - 1]];
+      let bestI = -1, bestD = Infinity;
+      for (const i of left) {
+        const d = Math.hypot(pts[i].x - last.x, pts[i].y - last.y);
+        if (d < bestD) { bestD = d; bestI = i; }
+      }
+      order.push(bestI);
+      left.delete(bestI);
+    }
+
+    game.stars = pts.map((p, i) => ({
+      x: p.x, y: p.y,
+      lit: false,
+      order: order.indexOf(i), // position of this star in the sequence
+      errorT: 0,
+      twinkle: Math.random() * Math.PI * 2,
+    }));
+    game.seqIndex = 0;
+    game.litCount = 0;
+    game.levelMistakes = 0;
+    game.dwell = { kind: null, index: -1, t: 0, off: 0 };
+
+    // memory levels start by showing the pattern
+    game.phase = game.levelMode === 'memory' ? 'show' : 'play';
+    game.showTimer = 0;
+
+    // drifting distractor embers from level 9
+    game.decoys = [];
+    const nDecoys = n >= 9 ? Math.min(3, n - 8) : 0;
+    for (let i = 0; i < nDecoys; i++) spawnDecoy();
   }
 
-  function spawnOrb() {
-    game.orbs.push({
-      x: W + 20,
-      y: rand(H * 0.15, H * 0.85),
-      r: 10,
-      vx: -game.speed,
+  function spawnDecoy() {
+    const fromLeft = Math.random() < 0.5;
+    game.decoys.push({
+      x: fromLeft ? -20 : W + 20,
+      y: rand(HUD_CLEAR + 60, H - 50),
+      vx: (fromLeft ? 1 : -1) * rand(18, 36),
+      vy: rand(-8, 8),
+      r: 7,
       phase: Math.random() * Math.PI * 2,
     });
+  }
+
+  function starBySeq(i) {
+    return game.stars.find((s) => s.order === i);
   }
 
   // ------------------------------------------------------------------ update
 
   function update(dt) {
-    const d = game.diff;
-    game.time += dt;
-    game.focusTime += dt;
-    game.bestFocusTime = Math.max(game.bestFocusTime, game.focusTime);
-
-    // focus multiplier grows the longer you fly clean
-    game.multiplier = 1 + Math.min(4, Math.floor(game.focusTime / 10));
-
-    // gentle difficulty ramp
-    game.speed = Math.min(d.max, d.base + game.time * d.ramp);
-
-    // ball glides toward wherever you're looking/pointing
+    // orb glides toward the gaze point
     const target = readTarget(dt);
     const ease = Math.min(1, dt * 7);
-    game.ball.x += (target.x - game.ball.x) * ease;
-    game.ball.y += (target.y - game.ball.y) * ease;
+    game.cursor.x += (target.x - game.cursor.x) * ease;
+    game.cursor.y += (target.y - game.cursor.y) * ease;
 
-    // spawn cadence tightens slowly as speed rises
-    game.spawnTimer -= dt;
-    if (game.spawnTimer <= 0) {
-      spawnObstacle();
-      game.spawnTimer = rand(1.15, 1.85) * d.spawnMul * clamp(d.base / game.speed, 0.55, 1) + 0.4;
-    }
-    game.orbTimer -= dt;
-    if (game.orbTimer <= 0) {
-      spawnOrb();
-      game.orbTimer = rand(3, 6);
+    for (const s of game.stars) {
+      s.twinkle += dt * 2;
+      if (s.errorT > 0) s.errorT -= dt;
     }
 
-    // move obstacles
-    for (const o of game.obstacles) {
-      o.x += o.vx * dt;
-      if (o.kind === 'drifter') {
-        o.phase += dt * 1.6;
-        o.y += Math.sin(o.phase) * o.drift * dt;
-        o.y = clamp(o.y, 0, H - o.h);
-      }
-    }
-    game.obstacles = game.obstacles.filter((o) => o.x + o.w > -10);
-
-    // orbs drift and bob
-    for (const orb of game.orbs) {
-      orb.x += orb.vx * dt;
-      orb.phase += dt * 3;
-    }
-    game.orbs = game.orbs.filter((o) => o.x > -30);
-
-    // scoring: survival + orbs, scaled by focus multiplier
-    game.score += dt * 10 * game.multiplier;
-
-    // collisions
-    const now = performance.now();
-    if (now > game.invulnUntil) {
-      for (const o of game.obstacles) {
-        if (circleRectHit(game.ball, o)) {
-          hitObstacle();
-          break;
-        }
-      }
+    // memory playback: pulse the sequence, then hand over
+    if (game.phase === 'show') {
+      game.showTimer += dt;
+      const per = 0.7;
+      if (game.showTimer > per * game.stars.length + 0.6) game.phase = 'play';
+    } else {
+      updateDwell(dt);
     }
 
-    for (let i = game.orbs.length - 1; i >= 0; i--) {
-      const orb = game.orbs[i];
-      const bobY = orb.y + Math.sin(orb.phase) * 6;
-      if (Math.hypot(orb.x - game.ball.x, bobY - game.ball.y) < orb.r + game.ball.r) {
-        game.orbs.splice(i, 1);
-        game.score += 50 * game.multiplier;
-        burst(orb.x, bobY, '#5eead4', 14);
-      }
+    // embers drift across the field
+    for (const d of game.decoys) {
+      d.x += d.vx * dt;
+      d.y += d.vy * dt;
+      d.phase += dt * 4;
     }
+    game.decoys = game.decoys.filter((d) => {
+      const gone = d.x < -40 || d.x > W + 40;
+      if (gone) spawnDecoy();
+      return !gone;
+    });
 
-    // particles
     for (const p of game.particles) {
       p.x += p.vx * dt;
       p.y += p.vy * dt;
+      p.vx *= 1 - dt * 1.5;
+      p.vy *= 1 - dt * 1.5;
       p.life -= dt;
     }
     game.particles = game.particles.filter((p) => p.life > 0);
 
-    // stars parallax
-    for (const s of game.stars) {
-      s.x -= game.speed * s.depth * dt * 0.3;
-      if (s.x < -2) { s.x = W + 2; s.y = Math.random() * H; }
+    for (const nb of game.nebulae) {
+      nb.x += nb.drift * dt;
+      if (nb.x < -nb.r) nb.x = W + nb.r;
+      if (nb.x > W + nb.r) nb.x = -nb.r;
     }
 
     // auto-pause if the face disappears (tracking modes only)
@@ -367,25 +348,99 @@
     updateHud();
   }
 
-  function hitObstacle() {
-    game.lives -= 1;
-    game.invulnUntil = performance.now() + 1800;
-    game.focusTime = 0;
-    burst(game.ball.x, game.ball.y, '#fb7185', 22);
-    if (navigator.vibrate) navigator.vibrate(80);
-    updateHud();
-    if (game.lives <= 0) endGame();
+  function updateDwell(dt) {
+    const cx = game.cursor.x, cy = game.cursor.y;
+
+    // nearest actionable target under the gaze
+    let kind = null, index = -1, bestD = Infinity;
+    game.stars.forEach((s, i) => {
+      if (s.lit) return;
+      const d = Math.hypot(s.x - cx, s.y - cy);
+      if (d < STAR_HIT_R && d < bestD) { bestD = d; kind = 'star'; index = i; }
+    });
+    game.decoys.forEach((d, i) => {
+      const dist = Math.hypot(d.x - cx, d.y - cy);
+      if (dist < STAR_HIT_R * 0.8 && dist < bestD) { bestD = dist; kind = 'decoy'; index = i; }
+    });
+
+    const dw = game.dwell;
+    if (kind === dw.kind && index === dw.index && kind !== null) {
+      dw.t += dt;
+      dw.off = 0;
+    } else if (kind === null && dw.kind !== null && dw.off < HOVER_GRACE) {
+      dw.off += dt; // brief drift off-target is forgiven
+    } else {
+      game.dwell = { kind, index, t: kind ? dt : 0, off: 0 };
+      return;
+    }
+
+    if (dw.kind === 'star' && dw.t >= DWELL_STAR) {
+      lightStar(dw.index);
+      game.dwell = { kind: null, index: -1, t: 0, off: 0 };
+    } else if (dw.kind === 'decoy' && dw.t >= DWELL_DECOY) {
+      distracted(dw.index);
+      game.dwell = { kind: null, index: -1, t: 0, off: 0 };
+    }
+  }
+
+  function lightStar(i) {
+    const s = game.stars[i];
+    const anyOrder = game.levelMode === 'free';
+
+    if (!anyOrder && s.order !== game.seqIndex) {
+      // gentle correction — no punishment beyond the streak
+      s.errorT = 0.6;
+      game.streak = 0;
+      game.levelMistakes += 1;
+      game.stats.mistakes += 1;
+      if (game.levelMode === 'memory') {
+        game.phase = 'show'; // softly replay the pattern
+        game.showTimer = 0;
+      }
+      return;
+    }
+
+    s.lit = true;
+    game.litCount += 1;
+    game.seqIndex += 1;
+    game.streak += 1;
+    game.bestStreak = Math.max(game.bestStreak, game.streak);
+    game.stats.starsLit += 1;
+    const mult = 1 + Math.min(4, Math.floor(game.streak / 4));
+    game.score += 10 * mult;
+    burst(s.x, s.y, '#5eead4', 12);
+    if (navigator.vibrate) navigator.vibrate(15);
+
+    if (game.litCount >= game.stars.length) completeLevel();
+  }
+
+  function distracted(i) {
+    const d = game.decoys[i];
+    if (!d) return; // decoy may have drifted offscreen this frame
+    burst(d.x, d.y, '#fbbf24', 10);
+    game.decoys.splice(i, 1);
+    spawnDecoy();
+    game.streak = 0;
+    game.stats.distractions += 1;
+  }
+
+  function completeLevel() {
+    game.stats.levelsDone += 1;
+    game.score += 20 + (game.levelMistakes === 0 ? 50 : 0);
+    state = 'flourish';
+    flourishT = 1.5;
+    for (const s of game.stars) burst(s.x, s.y, '#818cf8', 4);
   }
 
   function burst(x, y, color, n) {
     for (let i = 0; i < n; i++) {
       const a = Math.random() * Math.PI * 2;
-      const sp = rand(60, 260);
+      const sp = rand(40, 160);
       game.particles.push({
         x, y,
         vx: Math.cos(a) * sp,
         vy: Math.sin(a) * sp,
-        life: rand(0.3, 0.7),
+        life: rand(0.4, 0.9),
         color,
       });
     }
@@ -400,75 +455,169 @@
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, W, H);
 
-    ctx.fillStyle = 'rgba(255,255,255,0.5)';
-    for (const s of game.stars) {
-      ctx.globalAlpha = 0.25 + s.depth * 0.5;
+    // soft nebulae
+    for (const nb of game.nebulae) {
+      const g = ctx.createRadialGradient(nb.x, nb.y, 0, nb.x, nb.y, nb.r);
+      g.addColorStop(0, `hsla(${nb.hue}, 70%, 60%, 0.06)`);
+      g.addColorStop(1, 'transparent');
+      ctx.fillStyle = g;
+      ctx.fillRect(nb.x - nb.r, nb.y - nb.r, nb.r * 2, nb.r * 2);
+    }
+
+    // background twinkle
+    for (const s of game.bgStars) {
+      ctx.globalAlpha = 0.25 + 0.3 * (0.5 + 0.5 * Math.sin(s.tw + performance.now() / 900));
+      ctx.fillStyle = '#ffffff';
       ctx.beginPath();
       ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.globalAlpha = 1;
 
-    for (const orb of game.orbs) {
-      const y = orb.y + Math.sin(orb.phase) * 6;
-      ctx.save();
-      ctx.shadowColor = '#5eead4';
-      ctx.shadowBlur = 16;
-      ctx.fillStyle = '#5eead4';
-      ctx.beginPath();
-      ctx.arc(orb.x, y, orb.r, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-    }
+    drawConstellation();
+    drawDecoys();
 
-    for (const o of game.obstacles) {
-      const isWall = o.kind === 'wall';
-      ctx.save();
-      ctx.shadowColor = isWall ? '#818cf8' : '#f472b6';
-      ctx.shadowBlur = 12;
-      ctx.fillStyle = isWall ? 'rgba(129,140,248,0.9)' : 'rgba(244,114,182,0.85)';
-      roundRect(o.x, o.y, o.w, o.h, Math.min(10, o.w / 3));
-      ctx.fill();
-      ctx.restore();
-    }
-
+    // particles
     for (const p of game.particles) {
-      ctx.globalAlpha = Math.max(0, p.life / 0.7);
+      ctx.globalAlpha = Math.max(0, p.life / 0.9);
       ctx.fillStyle = p.color;
       ctx.beginPath();
-      ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+      ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.globalAlpha = 1;
 
-    // ball (blinks while invulnerable)
-    const blinking = performance.now() < game.invulnUntil;
-    if (!blinking || Math.floor(performance.now() / 120) % 2 === 0) {
-      ctx.save();
-      ctx.shadowColor = '#5eead4';
-      ctx.shadowBlur = 24;
-      const bg = ctx.createRadialGradient(
-        game.ball.x - game.ball.r * 0.3, game.ball.y - game.ball.r * 0.3, 2,
-        game.ball.x, game.ball.y, game.ball.r,
-      );
-      bg.addColorStop(0, '#d7fff5');
-      bg.addColorStop(1, '#2dd4bf');
-      ctx.fillStyle = bg;
+    drawCursor();
+  }
+
+  function drawConstellation() {
+    const now = performance.now();
+
+    // links between consecutively lit stars
+    ctx.save();
+    ctx.strokeStyle = 'rgba(94, 234, 212, 0.55)';
+    ctx.shadowColor = '#5eead4';
+    ctx.shadowBlur = 8;
+    ctx.lineWidth = 2;
+    for (let i = 1; i < game.seqIndex; i++) {
+      const a = starBySeq(i - 1), b = starBySeq(i);
+      if (!a || !b || !a.lit || !b.lit) continue;
       ctx.beginPath();
-      ctx.arc(game.ball.x, game.ball.y, game.ball.r, 0, Math.PI * 2);
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // memory playback: which star is currently pulsing
+    let showIdx = -1;
+    if (game.phase === 'show') {
+      showIdx = Math.floor(game.showTimer / 0.7);
+    }
+
+    game.stars.forEach((s) => {
+      const isNext = game.phase === 'play' && !s.lit && s.order === game.seqIndex &&
+        game.levelMode === 'path';
+      const isShowing = showIdx === s.order;
+      const tw = 0.6 + 0.4 * Math.sin(s.twinkle + now / 500);
+
+      ctx.save();
+      if (s.lit) {
+        ctx.shadowColor = '#5eead4';
+        ctx.shadowBlur = 18;
+        ctx.fillStyle = '#8ff7e4';
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, 7, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        // unlit star
+        ctx.shadowColor = s.errorT > 0 ? '#fb7185' : '#ffffff';
+        ctx.shadowBlur = s.errorT > 0 ? 16 : 8;
+        ctx.fillStyle = s.errorT > 0 ? '#fda4af' : `rgba(255,255,255,${0.45 + 0.3 * tw})`;
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, 5, 0, Math.PI * 2);
+        ctx.fill();
+
+        // guidance ring: next star in path mode, or during memory playback
+        if (isNext || isShowing) {
+          const pulse = 0.5 + 0.5 * Math.sin(now / 220);
+          ctx.strokeStyle = `rgba(94, 234, 212, ${0.35 + 0.45 * pulse})`;
+          ctx.lineWidth = 2;
+          ctx.shadowColor = '#5eead4';
+          ctx.shadowBlur = 12;
+          ctx.beginPath();
+          ctx.arc(s.x, s.y, 14 + pulse * 4, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+
+        // numbers in ordered mode
+        if (game.levelMode === 'ordered') {
+          ctx.shadowBlur = 0;
+          ctx.fillStyle = 'rgba(234, 240, 255, 0.85)';
+          ctx.font = '600 13px -apple-system, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText(String(s.order + 1), s.x, s.y - 14);
+        }
+      }
+      ctx.restore();
+
+      // dwell progress ring
+      const dw = game.dwell;
+      if (dw.kind === 'star' && game.stars[dw.index] === s && dw.t > 0.05) {
+        const frac = Math.min(1, dw.t / DWELL_STAR);
+        ctx.save();
+        ctx.strokeStyle = '#5eead4';
+        ctx.lineWidth = 3;
+        ctx.lineCap = 'round';
+        ctx.shadowColor = '#5eead4';
+        ctx.shadowBlur = 10;
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, 18, -Math.PI / 2, -Math.PI / 2 + frac * Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+    });
+  }
+
+  function drawDecoys() {
+    for (const d of game.decoys) {
+      const flick = 0.6 + 0.4 * Math.sin(d.phase);
+      ctx.save();
+      ctx.shadowColor = '#fbbf24';
+      ctx.shadowBlur = 14;
+      ctx.fillStyle = `rgba(251, 191, 36, ${0.5 + 0.35 * flick})`;
+      ctx.beginPath();
+      ctx.arc(d.x, d.y, d.r * (0.85 + 0.15 * flick), 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
+
+      const dw = game.dwell;
+      if (dw.kind === 'decoy' && game.decoys[dw.index] === d && dw.t > 0.05) {
+        const frac = Math.min(1, dw.t / DWELL_DECOY);
+        ctx.save();
+        ctx.strokeStyle = '#fbbf24';
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.arc(d.x, d.y, 15, -Math.PI / 2, -Math.PI / 2 + frac * Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
     }
   }
 
-  function roundRect(x, y, w, h, r) {
+  function drawCursor() {
+    const { x, y } = game.cursor;
+    ctx.save();
+    ctx.shadowColor = '#5eead4';
+    ctx.shadowBlur = 20;
+    const bg = ctx.createRadialGradient(x - 3, y - 3, 1, x, y, 11);
+    bg.addColorStop(0, '#d7fff5');
+    bg.addColorStop(1, '#2dd4bf');
+    ctx.fillStyle = bg;
     ctx.beginPath();
-    ctx.moveTo(x + r, y);
-    ctx.arcTo(x + w, y, x + w, y + h, r);
-    ctx.arcTo(x + w, y + h, x, y + h, r);
-    ctx.arcTo(x, y + h, x, y, r);
-    ctx.arcTo(x, y, x + w, y, r);
-    ctx.closePath();
+    ctx.arc(x, y, 11, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
   }
 
   // -------------------------------------------------------------------- loop
@@ -476,38 +625,74 @@
   function frame(t) {
     const dt = Math.min(0.05, (t - lastTime) / 1000 || 0);
     lastTime = t;
+
     if (state === 'playing') {
       update(dt);
       render();
-    } else if (state === 'countdown') {
-      // let the ball follow the player's eyes during the countdown so they
-      // learn the control before anything can hurt them
+    } else if (state === 'card') {
+      // orb already follows the eyes so the control stays warm
       const target = readTarget(dt);
       const ease = Math.min(1, dt * 7);
-      game.ball.x += (target.x - game.ball.x) * ease;
-      game.ball.y += (target.y - game.ball.y) * ease;
+      game.cursor.x += (target.x - game.cursor.x) * ease;
+      game.cursor.y += (target.y - game.cursor.y) * ease;
       render();
-
-      countdownT -= dt;
-      const n = Math.ceil(Math.max(0, countdownT));
-      ui.countNum.textContent = n > 0 ? n : 'Go!';
-      if (countdownT <= -0.5) {
-        hide(ui.countdown);
-        lastTime = t;
+      cardT -= dt;
+      if (cardT <= 0) {
+        hide(ui.card);
         state = 'playing';
       }
+    } else if (state === 'flourish') {
+      update(dt);
+      render();
+      flourishT -= dt;
+      if (flourishT <= 0) nextLevel();
+    } else if (state === 'breathing') {
+      breathe(dt);
     }
+
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
+
+  // -------------------------------------------------------------- breathing
+
+  function startBreathing() {
+    state = 'breathing';
+    breath = { t: 0, phase: '' };
+    show(ui.breath);
+  }
+
+  function breathe(dt) {
+    breath.t += dt;
+    const cycle = 8; // 4s in, 4s out
+    const t = breath.t % cycle;
+    const inhale = t < 4;
+    const frac = inhale ? t / 4 : 1 - (t - 4) / 4;
+    const scale = 0.55 + 0.45 * easeInOut(frac);
+    ui.breathCircle.style.transform = `scale(${scale.toFixed(3)})`;
+    const label = inhale ? 'Breathe in…' : 'Breathe out…';
+    if (label !== breath.phase) {
+      breath.phase = label;
+      ui.breathText.textContent = label;
+    }
+    if (breath.t >= cycle * 2) endBreathing(); // two calm cycles
+  }
+
+  function endBreathing() {
+    hide(ui.breath);
+    showLevelCard();
+  }
+
+  function easeInOut(t) { return t * t * (3 - 2 * t); }
 
   // --------------------------------------------------------------------- HUD
 
   function updateHud() {
     ui.score.textContent = Math.floor(game.score);
-    ui.lives.textContent = '❤️'.repeat(Math.max(0, game.lives)) || '💔';
-    if (game.multiplier > 1) {
-      ui.streak.textContent = `FOCUS ×${game.multiplier}`;
+    ui.level.textContent = `✦ L${game.level}`;
+    const mult = 1 + Math.min(4, Math.floor(game.streak / 4));
+    if (mult > 1) {
+      ui.streak.textContent = `FOCUS ×${mult}`;
       ui.streak.classList.remove('hidden');
     } else {
       ui.streak.classList.add('hidden');
@@ -521,13 +706,12 @@
 
   async function startFlow() {
     game.mode = ui.modeSelect.value;
-    game.diff = DIFFICULTY[ui.diffSelect.value] || DIFFICULTY.gentle;
     tracker.mode = game.mode === 'touch' ? 'both' : game.mode;
     tracker.sensitivity = Number(ui.sensitivity.value);
     hide(ui.startError);
 
     if (game.mode === 'touch') {
-      beginPlay();
+      beginSession();
       return;
     }
 
@@ -572,7 +756,7 @@
       for (const p of CAL_POINTS) {
         ui.calibStatus.textContent = p.label;
         placeCalDot(p);
-        await delay(700); // let the dot glide over and the eyes settle
+        await delay(700);
         ui.calibRing.style.strokeDashoffset = RING_LEN;
         points[p.key] = await tracker.samplePoint(1300, (t) => {
           ui.calibRing.style.strokeDashoffset = RING_LEN * (1 - t);
@@ -587,7 +771,7 @@
     ui.calibStatus.textContent = 'Calibrated ✓';
     setTimeout(() => {
       hide(ui.calib);
-      beginPlay();
+      beginSession();
     }, 450);
   }
 
@@ -600,23 +784,42 @@
     state = 'menu';
   }
 
-  function beginPlay() {
-    resetGame();
+  function beginSession() {
+    game.level = 1;
+    game.score = 0;
+    game.streak = 0;
+    game.bestStreak = 0;
+    game.stats = { starsLit: 0, mistakes: 0, distractions: 0, levelsDone: 0, startTime: performance.now() };
+    game.cursor.x = W / 2;
+    game.cursor.y = H / 2;
+    game.particles = [];
+    kb.x = 0; kb.y = 0;
+    makeBackground();
+    makeLevel(game.level);
     hide(ui.start);
     hide(ui.over);
     hide(ui.pause);
     show(ui.hud);
     ui.trackDot.classList.toggle('ok', game.mode === 'touch' || tracker.faceVisible);
-    startCountdown('The ball follows your gaze — try it!');
+    updateHud();
+    showLevelCard();
   }
 
-  function startCountdown(hint) {
-    countdownT = 3;
-    ui.countNum.textContent = '3';
-    ui.countHint.textContent = hint || '';
-    show(ui.countdown);
+  function nextLevel() {
+    game.level += 1;
+    makeLevel(game.level);
+    updateHud();
+    if ((game.level - 1) % 3 === 0 && game.level > 1) startBreathing();
+    else showLevelCard();
+  }
+
+  function showLevelCard() {
+    ui.cardTitle.textContent = `Level ${game.level}`;
+    ui.cardHint.textContent = MODE_HINTS[game.levelMode] || '';
+    show(ui.card);
+    cardT = 2.0;
     lastTime = performance.now();
-    state = 'countdown';
+    state = 'card';
   }
 
   function pauseGame(title, msg) {
@@ -629,11 +832,13 @@
 
   function resumeGame() {
     hide(ui.pause);
-    startCountdown('');
+    lastTime = performance.now();
+    state = 'playing';
   }
 
-  function endGame() {
-    state = 'over';
+  function endSession() {
+    state = 'summary';
+    hide(ui.pause);
     const score = Math.floor(game.score);
     if (score > best) {
       best = score;
@@ -643,11 +848,33 @@
       ui.bestScore.textContent = `Best: ${best}`;
     }
     ui.finalScore.textContent = score;
+
+    const mins = Math.max(1, Math.round((performance.now() - game.stats.startTime) / 60000));
+    ui.sumStats.innerHTML = '';
+    const rows = [
+      ['Levels woven', game.stats.levelsDone],
+      ['Stars lit', game.stats.starsLit],
+      ['Longest streak', game.bestStreak],
+      ['Focused minutes', mins],
+    ];
+    for (const [k, v] of rows) {
+      const div = document.createElement('div');
+      div.className = 'sum-row';
+      const kEl = document.createElement('span');
+      kEl.textContent = k;
+      const vEl = document.createElement('strong');
+      vEl.textContent = String(v);
+      div.append(kEl, vEl);
+      ui.sumStats.appendChild(div);
+    }
+
+    const total = game.stats.starsLit + game.stats.mistakes;
+    const acc = total ? Math.round((game.stats.starsLit / total) * 100) : 100;
     ui.focusReport.textContent =
-      `Longest focus streak: ${Math.floor(game.bestFocusTime)}s without a hit. ` +
-      (game.bestFocusTime >= 30 ? 'Excellent sustained attention!' :
-       game.bestFocusTime >= 15 ? 'Solid focus — keep training.' :
-       'Short sessions daily build steadier focus.');
+      acc >= 90 ? `${acc}% precision — calm, deliberate attention. Beautiful.` :
+      acc >= 70 ? `${acc}% precision — steady progress. Focus grows with practice.` :
+      `${acc}% precision — slow down and let the ring fill. That pause IS the training.`;
+
     hide(ui.hud);
     show(ui.over);
   }
@@ -658,17 +885,18 @@
     hide(ui.pause);
     hide(ui.over);
     hide(ui.hud);
-    hide(ui.countdown);
+    hide(ui.card);
+    hide(ui.breath);
     show(ui.start);
   }
 
   ui.startBtn.addEventListener('click', startFlow);
   ui.pauseBtn.addEventListener('click', () => pauseGame('Paused'));
   ui.resumeBtn.addEventListener('click', resumeGame);
-  ui.quitBtn.addEventListener('click', quitToMenu);
+  ui.quitBtn.addEventListener('click', endSession);
+  ui.breathSkip.addEventListener('click', endBreathing);
   ui.retryBtn.addEventListener('click', () => {
-    // camera/calibration are still live — jump straight back in
-    if (game.mode === 'touch' || tracker.isCalibrated) beginPlay();
+    if (game.mode === 'touch' || tracker.isCalibrated) beginSession();
     else quitToMenu();
   });
   ui.menuBtn.addEventListener('click', quitToMenu);
@@ -703,15 +931,6 @@
         else if (performance.now() - t0 > timeoutMs) { clearInterval(iv); resolve(false); }
       }, 100);
     });
-  }
-
-  function circleRectHit(ball, rect) {
-    const cx = clamp(ball.x, rect.x, rect.x + rect.w);
-    const cy = clamp(ball.y, rect.y, rect.y + rect.h);
-    const dx = ball.x - cx;
-    const dy = ball.y - cy;
-    // shrink the hitbox slightly so grazing feels fair
-    return dx * dx + dy * dy < (ball.r * 0.82) * (ball.r * 0.82);
   }
 
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }

@@ -1,6 +1,18 @@
-# 👁️ FocusBall
+# 👁️ FocusBall — Constellation Weaver
 
-A web game that you steer **with your eyes and head**. Guide the glowing ball up, down, left, and right through moving obstacles — lose all three lives and the session is over. Designed as a light focus-training exercise: the longer you fly without a hit, the higher your **FOCUS multiplier** climbs, and at the end you get a report of your longest focus streak.
+A calm web game you play **with your eyes and head**. Star patterns appear in a night sky; rest your gaze on a star and hold it there until its ring fills — the star lights, and glowing lines weave the constellation together. There are no lives and no game over: mistakes just soften your streak, and every third level ends with a guided breathing interlude.
+
+It's built as a focus-training exercise. Each level type trains a different attention skill:
+
+| Levels | Mode | What it trains |
+|---|---|---|
+| 1–2 | **Free** — light stars in any order | sustained, deliberate gaze (the dwell) |
+| 3–4 | **Path** — follow the glowing hint | guided attention shifting |
+| 5–6 | **Ordered** — find the numbers, light in order | visual search + working memory |
+| 7+ | **Memory** — the pattern flashes once, then you recall it | attention + memory under no guidance |
+| 9+ | **+ Embers** — drifting amber distractors cross the sky | distraction resistance (gazing at one breaks your streak) |
+
+Star count grows from 3 to 8 as you level, holding your streak multiplies your score, and the session summary reports levels woven, stars lit, longest streak, focused minutes, and gaze precision.
 
 ## How it works
 
@@ -21,9 +33,8 @@ iPhones don't expose the Face ID / TrueDepth sensor to web pages, so the game us
    - **Head only** — steer by turning/tilting your head
    - **Eyes only** — steer by looking around (needs good lighting)
    - **Touch / Keyboard** — fallback: drag on screen or use WASD/arrow keys
-3. Pick a pace: **Gentle** (slow, 5 lives — the default), **Normal**, or **Swift**.
-4. Allow camera access and follow the calibration dot to all five positions.
-5. Dodge the walls, blocks, and drifters; collect teal orbs for bonus points.
+3. Allow camera access and follow the calibration dot to all five positions.
+4. Rest your gaze on each star until its ring fills. Weave the whole constellation to advance; end the session any time from the pause menu to see your focus summary.
 
 **Tips:** sit in even lighting, keep the phone roughly at eye level, and use the sensitivity slider if the ball feels too sluggish or too twitchy.
 

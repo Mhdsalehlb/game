@@ -34,7 +34,6 @@
     calibTarget: document.getElementById('calibTarget'),
     calibRing: document.getElementById('calibRing'),
     calibStatus: document.getElementById('calibStatus'),
-    calibStep: document.getElementById('calibStep'),
     recalBtn: document.getElementById('recalBtn'),
     unlock: document.getElementById('unlockScreen'),
     unlockMsg: document.getElementById('unlockMsg'),
@@ -45,8 +44,13 @@
     unlockError: document.getElementById('unlockError'),
     unlockLaterBtn: document.getElementById('unlockLaterBtn'),
     card: document.getElementById('countdown'),
+    cardPre: document.getElementById('cardPre'),
     cardTitle: document.getElementById('countNum'),
     cardHint: document.getElementById('countHint'),
+    factCard: document.getElementById('factCard'),
+    factTitle: document.getElementById('factTitle'),
+    factText: document.getElementById('factText'),
+    calibDots: document.getElementById('calibDots'),
     breath: document.getElementById('breathScreen'),
     breathCircle: document.getElementById('breathCircle'),
     breathText: document.getElementById('breathText'),
@@ -72,7 +76,8 @@
   const DWELL_STAR = 0.8;    // seconds of steady gaze to light a star
   const DWELL_DECOY = 0.55;  // seconds on an ember before it counts as a distraction
   const HOVER_GRACE = 0.2;   // seconds of drift allowed before a dwell resets
-  const STAR_HIT_R = 40;     // generous gaze-target radius around each star
+  const STAR_HIT_R = 40;     // max gaze-target radius (shrunk when stars sit close)
+  const SKY = window.STARGAZE_SKY || [];
 
   // Calibration dots as fractions of the viewport.
   const CAL_POINTS = [
@@ -232,43 +237,53 @@
     return 'memory';
   }
 
+  // rotate through the constellations of each size so repeats vary
+  const skyCursor = {};
+
+  function pickConstellation(count) {
+    const pool = SKY.filter((c) => c.count === count);
+    if (!pool.length) return SKY[SKY.length - 1];
+    skyCursor[count] = (skyCursor[count] || 0) % pool.length;
+    return pool[skyCursor[count]++];
+  }
+
   function makeLevel(n) {
     game.levelMode = levelModeFor(n);
     const count = Math.min(8, 3 + Math.floor((n - 1) / 2));
+    const c = pickConstellation(count);
+    game.constellation = c;
 
-    // scatter stars with a minimum spacing, away from edges and the HUD
-    const marginX = W * 0.12;
-    const top = HUD_CLEAR + 70, bottom = H - 60;
-    const minDist = Math.min(W, H) * (count <= 5 ? 0.24 : 0.19);
-    const pts = [];
-    let guard = 400;
-    while (pts.length < count && guard-- > 0) {
-      const p = { x: rand(marginX, W - marginX), y: rand(top, bottom) };
-      if (pts.every((q) => Math.hypot(p.x - q.x, p.y - q.y) > minDist)) pts.push(p);
-    }
-    while (pts.length < count) pts.push({ x: rand(marginX, W - marginX), y: rand(top, bottom) });
+    // fit the constellation's canonical shape to the playfield,
+    // preserving its aspect so the real sky pattern stays recognizable
+    const marginX = W * 0.13;
+    const top = HUD_CLEAR + 80, bottom = H - 70;
+    const availW = W - marginX * 2, availH = bottom - top;
+    const xs = c.stars.map((s) => s.x), ys = c.stars.map((s) => s.y);
+    const bw = Math.max(0.05, Math.max(...xs) - Math.min(...xs));
+    const bh = Math.max(0.05, Math.max(...ys) - Math.min(...ys));
+    const scale = Math.min(availW / bw, availH / bh);
+    const ox = marginX + (availW - bw * scale) / 2 - Math.min(...xs) * scale;
+    const oy = top + (availH - bh * scale) / 2 - Math.min(...ys) * scale;
 
-    // chain stars nearest-neighbor so the constellation reads as a path
-    const order = [0];
-    const left = new Set(pts.map((_, i) => i).slice(1));
-    while (left.size) {
-      const last = pts[order[order.length - 1]];
-      let bestI = -1, bestD = Infinity;
-      for (const i of left) {
-        const d = Math.hypot(pts[i].x - last.x, pts[i].y - last.y);
-        if (d < bestD) { bestD = d; bestI = i; }
-      }
-      order.push(bestI);
-      left.delete(bestI);
-    }
-
-    game.stars = pts.map((p, i) => ({
-      x: p.x, y: p.y,
+    game.stars = c.stars.map((s, i) => ({
+      x: ox + s.x * scale,
+      y: oy + s.y * scale,
+      name: s.name,
       lit: false,
-      order: order.indexOf(i), // position of this star in the sequence
+      order: i, // traditional line-drawing order from the sky data
       errorT: 0,
       twinkle: Math.random() * Math.PI * 2,
     }));
+
+    // shrink the gaze radius when the real shape puts stars close together
+    let minD = Infinity;
+    for (let i = 0; i < game.stars.length; i++) {
+      for (let j = i + 1; j < game.stars.length; j++) {
+        minD = Math.min(minD, Math.hypot(
+          game.stars[i].x - game.stars[j].x, game.stars[i].y - game.stars[j].y));
+      }
+    }
+    game.hitR = Math.max(24, Math.min(STAR_HIT_R, minD / 2 - 6));
     game.seqIndex = 0;
     game.litCount = 0;
     game.levelMistakes = 0;
@@ -367,14 +382,15 @@
 
     // nearest actionable target under the gaze
     let kind = null, index = -1, bestD = Infinity;
+    const hitR = game.hitR || STAR_HIT_R;
     game.stars.forEach((s, i) => {
       if (s.lit) return;
       const d = Math.hypot(s.x - cx, s.y - cy);
-      if (d < STAR_HIT_R && d < bestD) { bestD = d; kind = 'star'; index = i; }
+      if (d < hitR && d < bestD) { bestD = d; kind = 'star'; index = i; }
     });
     game.decoys.forEach((d, i) => {
       const dist = Math.hypot(d.x - cx, d.y - cy);
-      if (dist < STAR_HIT_R * 0.8 && dist < bestD) { bestD = dist; kind = 'decoy'; index = i; }
+      if (dist < hitR * 0.8 && dist < bestD) { bestD = dist; kind = 'decoy'; index = i; }
     });
 
     const dw = game.dwell;
@@ -442,8 +458,13 @@
     game.stats.levelsDone += 1;
     game.score += 20 + (game.levelMistakes === 0 ? 50 : 0);
     state = 'flourish';
-    flourishT = 1.5;
+    flourishT = 4.2; // long enough to read the constellation's story
     for (const s of game.stars) burst(s.x, s.y, PAL().particleLevel, 4);
+    if (game.constellation) {
+      ui.factTitle.textContent = `✦ ${game.constellation.name}`;
+      ui.factText.textContent = game.constellation.fact;
+      show(ui.factCard);
+    }
   }
 
   function burst(x, y, color, n) {
@@ -503,6 +524,31 @@
     ctx.globalAlpha = 1;
 
     drawCursor();
+  }
+
+  /** Background, nebulae, and twinkling stars only — used behind calibration. */
+  function renderAmbient() {
+    const p = PAL();
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, p.bgTop);
+    grad.addColorStop(1, p.bgBot);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+    game.nebulae.forEach((nb, i) => {
+      const hue = p.nebulaHues[i % p.nebulaHues.length];
+      const g = ctx.createRadialGradient(nb.x, nb.y, 0, nb.x, nb.y, nb.r);
+      g.addColorStop(0, `hsla(${hue}, 55%, 55%, ${p.nebulaAlpha})`);
+      g.addColorStop(1, 'transparent');
+      ctx.fillStyle = g;
+      ctx.fillRect(nb.x - nb.r, nb.y - nb.r, nb.r * 2, nb.r * 2);
+    });
+    for (const s of game.bgStars) {
+      const a = 0.2 + 0.28 * (0.5 + 0.5 * Math.sin(s.tw + performance.now() / 900));
+      ctx.fillStyle = `rgba(${p.bgStar}, ${a.toFixed(3)})`;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 
   function drawConstellation() {
@@ -590,6 +636,20 @@
         ctx.beginPath();
         ctx.arc(s.x, s.y, 18, -Math.PI / 2, -Math.PI / 2 + frac * Math.PI * 2);
         ctx.stroke();
+        ctx.restore();
+      }
+
+      // a lit star reveals its real name — small reward, small lesson
+      if (s.name && (s.lit || isShowing)) {
+        ctx.save();
+        ctx.shadowColor = 'transparent';
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = p.text;
+        ctx.globalAlpha = s.lit ? 0.75 : 0.55;
+        ctx.font = 'italic 500 12.5px "Cormorant Garamond", Georgia, serif';
+        ctx.textAlign = 'center';
+        const below = s.y < H - 60;
+        ctx.fillText(s.name, s.x, below ? s.y + 27 : s.y - 22);
         ctx.restore();
       }
     });
@@ -680,6 +740,14 @@
     if (state === 'playing') {
       update(dt);
       render();
+    } else if (state === 'calibrating') {
+      // a living sky behind the calibration keeps the moment calm
+      for (const nb of game.nebulae) {
+        nb.x += nb.drift * dt;
+        if (nb.x < -nb.r) nb.x = W + nb.r;
+        if (nb.x > W + nb.r) nb.x = -nb.r;
+      }
+      renderAmbient();
     } else if (state === 'warmup') {
       const target = readTarget(dt);
       const ease = Math.min(1, dt * 7);
@@ -722,6 +790,7 @@
   // -------------------------------------------------------------- breathing
 
   function startBreathing() {
+    hide(ui.factCard);
     state = 'breathing';
     breath = { t: 0, phase: '' };
     show(ui.breath);
@@ -792,11 +861,22 @@
       return;
     }
     ui.startBtn.disabled = false;
-    ui.startBtn.textContent = 'Start';
+    ui.startBtn.textContent = 'Begin';
 
+    if (!game.bgStars.length) makeBackground();
     hide(ui.start);
     show(ui.calib);
     runCalibration();
+  }
+
+  function renderCalibDots(activeIdx, doneCount) {
+    ui.calibDots.innerHTML = '';
+    for (let i = 0; i < CAL_POINTS.length; i++) {
+      const d = document.createElement('span');
+      d.className = 'calib-progress-dot' +
+        (i < doneCount ? ' done' : i === activeIdx ? ' active' : '');
+      ui.calibDots.appendChild(d);
+    }
   }
 
   function placeCalDot(p) {
@@ -838,9 +918,10 @@
 
   async function runCalibration() {
     state = 'calibrating';
+    if (!game.bgStars.length) makeBackground();
     ui.calibRing.style.strokeDashoffset = RING_LEN;
     ui.calibStatus.textContent = 'Looking for your face…';
-    ui.calibStep.textContent = '';
+    renderCalibDots(-1, 0);
     placeCalDot(CAL_POINTS[0]);
 
     const seen = await waitFor(() => tracker.faceVisible, 15000);
@@ -854,7 +935,7 @@
     try {
       for (let idx = 0; idx < CAL_POINTS.length; idx++) {
         const p = CAL_POINTS[idx];
-        ui.calibStep.textContent = `${idx + 1} / ${CAL_POINTS.length}`;
+        renderCalibDots(idx, idx);
         let ok = false;
         for (let attempt = 1; attempt <= MAX_TRIES && !ok; attempt++) {
           if (attempt > 1) {
@@ -865,6 +946,9 @@
           if (pointVerifies(p.key, sample, points.center)) {
             points[p.key] = sample;
             ok = true;
+            ui.calibStatus.textContent = '✓';
+            renderCalibDots(-1, idx + 1);
+            await delay(320);
           }
         }
         if (!ok) {
@@ -1013,10 +1097,12 @@
   }
 
   function showLevelCard() {
-    ui.cardTitle.textContent = `Level ${game.level}`;
+    hide(ui.factCard);
+    ui.cardPre.textContent = `Level ${game.level}`;
+    ui.cardTitle.textContent = game.constellation ? game.constellation.name : `Level ${game.level}`;
     ui.cardHint.textContent = MODE_HINTS[game.levelMode] || '';
     show(ui.card);
-    cardT = 2.0;
+    cardT = 2.4;
     lastTime = performance.now();
     state = 'card';
   }
@@ -1038,6 +1124,7 @@
   function endSession() {
     state = 'summary';
     hide(ui.pause);
+    hide(ui.factCard);
     const score = Math.floor(game.score);
     if (score > best) {
       best = score;
@@ -1087,6 +1174,7 @@
     hide(ui.card);
     hide(ui.breath);
     hide(ui.unlock);
+    hide(ui.factCard);
     show(ui.start);
   }
 

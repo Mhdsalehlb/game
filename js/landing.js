@@ -74,8 +74,8 @@
   function palette() {
     const light = document.body.classList.contains('light');
     return light
-      ? { star: '106, 116, 168', link: 'rgba(176, 141, 62, 0.25)' }
-      : { star: '255, 244, 214', link: 'rgba(238, 216, 150, 0.22)' };
+      ? { star: '110, 118, 150', link: 'rgba(163, 137, 76, 0.22)' }
+      : { star: '238, 234, 220', link: 'rgba(217, 194, 143, 0.18)' };
   }
 
   function frame() {

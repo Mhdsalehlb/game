@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="theme-color" content="#0a0e1f" />
+  <title>Stargaze — Play</title>
+  <meta name="description" content="Weave constellations with your eyes. Calm, progressive focus training." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>✦</text></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <!-- Hidden camera feed used for face/eye tracking -->
+  <video id="camera" playsinline muted autoplay></video>
+
+  <canvas id="game"></canvas>
+
+  <!-- HUD -->
+  <div id="hud" class="hidden">
+    <div class="hud-left">
+      <div id="score" class="hud-pill">0</div>
+      <div id="streak" class="hud-pill streak hidden">FOCUS ×1</div>
+    </div>
+    <div class="hud-right">
+      <div id="levelPill" class="hud-pill">✦ L1</div>
+      <div id="trackDot" class="track-dot" title="Tracking status"></div>
+      <button id="pauseBtn" class="icon-btn" aria-label="Pause">⏸</button>
+    </div>
+  </div>
+
+  <!-- Start screen -->
+  <div id="startScreen" class="screen">
+    <button id="themeBtn" class="icon-btn theme-btn" aria-label="Toggle theme">☾</button>
+    <div class="panel">
+      <div class="logo">✦</div>
+      <h1>Stargaze</h1>
+      <p class="tagline">Weave constellations with your eyes.<br/>
+        Slow down. Restore your focus.</p>
+
+      <div class="settings">
+        <label class="setting">
+          <span>Control mode</span>
+          <select id="modeSelect">
+            <option value="both" selected>Head + Eyes</option>
+            <option value="head">Head only</option>
+            <option value="eyes">Eyes only</option>
+            <option value="touch">Touch / Keyboard</option>
+          </select>
+        </label>
+        <label class="setting">
+          <span>Sensitivity</span>
+          <input id="sensitivity" type="range" min="0.6" max="1.8" step="0.05" value="1" />
+        </label>
+      </div>
+
+      <button id="startBtn" class="primary-btn">Begin</button>
+      <p class="hint">Uses your front camera, processed entirely on your device.<br/>
+        Nothing is recorded or uploaded.</p>
+      <p id="startError" class="error hidden"></p>
+    </div>
+  </div>
+
+  <!-- Calibration screen: the dot glides to 5 positions; each is verified -->
+  <div id="calibScreen" class="screen hidden">
+    <div class="calib-instructions">
+      <h2>Calibration <span id="calibStep" class="calib-step"></span></h2>
+      <p id="calibGuide">Keep your head comfortable and still.<br/>
+        Follow the dot <strong>with your eyes</strong> — we check each step before moving on.</p>
+    </div>
+    <div id="calibTarget" class="calib-target">
+      <svg viewBox="0 0 120 120" width="120" height="120">
+        <circle class="calib-ring-bg" cx="60" cy="60" r="52" />
+        <circle id="calibRing" class="calib-ring" cx="60" cy="60" r="52" />
+      </svg>
+      <div class="calib-dot"></div>
+    </div>
+    <p id="calibStatus" class="calib-status">Looking for your face…</p>
+  </div>
+
+  <!-- Level card overlay -->
+  <div id="countdown" class="countdown hidden">
+    <div id="countNum" class="count-num">Level 1</div>
+    <div id="countHint" class="count-hint"></div>
+  </div>
+
+  <!-- Breathing interlude -->
+  <div id="breathScreen" class="screen overlay hidden">
+    <div class="breath-wrap">
+      <div id="breathCircle" class="breath-circle"></div>
+      <p id="breathText" class="breath-text">Breathe in…</p>
+    </div>
+    <button id="breathSkip" class="ghost-btn breath-skip">Skip</button>
+  </div>
+
+  <!-- Pause overlay -->
+  <div id="pauseScreen" class="screen overlay hidden">
+    <div class="panel small">
+      <h2 id="pauseTitle">Paused</h2>
+      <p id="pauseMsg">Take a breath.</p>
+      <button id="resumeBtn" class="primary-btn">Resume</button>
+      <button id="recalBtn" class="ghost-btn">Recalibrate</button>
+      <button id="quitBtn" class="ghost-btn">End session</button>
+    </div>
+  </div>
+
+  <!-- Unlock screen (shown after the free preview once selling is enabled) -->
+  <div id="unlockScreen" class="screen overlay hidden">
+    <div class="panel small">
+      <div class="logo">✦</div>
+      <h2>Unlock the full sky</h2>
+      <p id="unlockMsg" class="tagline">You've woven the free preview.<br/>
+        One purchase, yours forever — <span id="unlockPrice">$50</span> lifetime.</p>
+      <a id="buyBtn" class="primary-btn" target="_blank" rel="noopener">Get lifetime access</a>
+      <div class="license-row">
+        <input id="licenseInput" type="text" placeholder="Already bought? Paste license key" autocomplete="off" />
+        <button id="licenseBtn" class="ghost-btn">Unlock</button>
+      </div>
+      <p id="unlockError" class="error hidden"></p>
+      <button id="unlockLaterBtn" class="ghost-btn">End session</button>
+    </div>
+  </div>
+
+  <!-- Session summary screen -->
+  <div id="overScreen" class="screen overlay hidden">
+    <div class="panel small">
+      <h2>Session complete</h2>
+      <div class="final-score"><span id="finalScore">0</span> pts</div>
+      <p id="bestScore" class="best"></p>
+      <div id="sumStats" class="sum-stats"></div>
+      <p id="focusReport" class="focus-report"></p>
+      <button id="retryBtn" class="primary-btn">Weave again</button>
+      <button id="menuBtn" class="ghost-btn">Menu</button>
+    </div>
+  </div>
+
+  <!-- MediaPipe Face Mesh (face + iris landmarks, all on-device) -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1675466862/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/face_mesh.js" crossorigin="anonymous"></script>
+
+  <script src="js/config.js"></script>
+  <script src="js/theme.js"></script>
+  <script src="js/tracking.js"></script>
+  <script src="js/game.js"></script>
+</body>
+</html>

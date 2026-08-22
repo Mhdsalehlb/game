@@ -1,71 +1,65 @@
-# 👁️ FocusBall — Constellation Weaver
+# ✦ Stargaze
 
-A calm web game you play **with your eyes and head**. Star patterns appear in a night sky; rest your gaze on a star and hold it there until its ring fills — the star lights, and glowing lines weave the constellation together. There are no lives and no game over: mistakes just soften your streak, and every third level ends with a guided breathing interlude.
+**Focus training you play with your eyes.** A calm web game: star patterns appear in a night sky, and you light each star by resting your gaze on it until its ring fills. Lit stars weave glowing constellation lines. No lives, no game over — mistakes soften your streak, every third level ends in a guided breathing interlude, and sessions close with a focus report.
 
-It's built as a focus-training exercise. Each level type trains a different attention skill:
+**Live site:** landing page at `/` (`index.html`), game at `/app.html`.
+
+## Level progression
 
 | Levels | Mode | What it trains |
 |---|---|---|
 | 1–2 | **Free** — light stars in any order | sustained, deliberate gaze (the dwell) |
 | 3–4 | **Path** — follow the glowing hint | guided attention shifting |
-| 5–6 | **Ordered** — find the numbers, light in order | visual search + working memory |
-| 7+ | **Memory** — the pattern flashes once, then you recall it | attention + memory under no guidance |
-| 9+ | **+ Embers** — drifting amber distractors cross the sky | distraction resistance (gazing at one breaks your streak) |
+| 5–6 | **Ordered** — numbered stars, in order | visual search + working memory |
+| 7+ | **Memory** — pattern flashes once, then recall | memory under no guidance |
+| 9+ | **+ Embers** — drifting distractors | distraction resistance |
 
-Star count grows from 3 to 8 as you level, holding your streak multiplies your score, and the session summary reports levels woven, stars lit, longest streak, focused minutes, and gaze precision.
+Star count grows 3 → 8; streaks multiply score; night and light (dawn) themes.
 
-## How it works
+## Eye tracking
 
-iPhones don't expose the Face ID / TrueDepth sensor to web pages, so the game uses the next best thing: the **front camera + [MediaPipe Face Mesh](https://developers.google.com/mediapipe)** running entirely in your browser. It tracks 478 face landmarks (including your irises) every frame and converts your head turn and gaze direction into ball movement.
+iPhones don't expose Face ID / TrueDepth to web pages, so Stargaze uses the front camera + [MediaPipe Face Mesh](https://developers.google.com/mediapipe) (478 landmarks incl. irises) **entirely on-device** — nothing is recorded or uploaded.
 
-- **All processing happens on-device.** No video is recorded or uploaded anywhere.
-- A 5-point calibration (follow the dot to center/left/right/up/down) learns your personal range of motion per direction, so the mapping fits you rather than an assumed average.
-- Control is **positional**: your gaze/head offset maps to a spot on screen and the ball glides there — look left, ball is left.
-- Blinks are detected from eyelid openness and gaze is held through them (iris landmarks go haywire mid-blink).
-- A One Euro filter smooths jitter adaptively: steady when you're still, low-latency when you move.
-- If your face leaves the frame, the game auto-pauses; resuming gives a 3-2-1 countdown.
+- **Verified 5-point calibration**: the dot glides center → left → right → up → down. Each step is checked against the center sample (the signal must move enough, mostly on the right axis) and is retried with guidance if the user didn't follow; opposite directions must genuinely oppose or calibration restarts. A bad calibration can no longer silently continue.
+- **Warm-up gate**: after calibrating, players glide the orb into a ring before the first level — proof the control works, with "Recalibrate" always available from the pause menu.
+- Blink handling (gaze frozen during blinks), vertical gaze normalized by eye width, One Euro filtering, positional control.
+- Control modes: Head + Eyes (default), Head only, Eyes only, Touch/Keyboard fallback.
 
-## Playing
+## Selling it (the $50 lifetime model)
 
-1. Open the game over **HTTPS** (the camera API requires it — see hosting below).
-2. Pick a control mode:
-   - **Head + Eyes** (default, most reliable) — blend of head turn and gaze
-   - **Head only** — steer by turning/tilting your head
-   - **Eyes only** — steer by looking around (needs good lighting)
-   - **Touch / Keyboard** — fallback: drag on screen or use WASD/arrow keys
-3. Allow camera access and follow the calibration dot to all five positions.
-4. Rest your gaze on each star until its ring fills. Weave the whole constellation to advance; end the session any time from the pause menu to see your focus summary.
+The paywall ships dormant. To turn it on (~10 minutes):
 
-**Tips:** sit in even lighting, keep the phone roughly at eye level, and use the sensitivity slider if the ball feels too sluggish or too twitchy.
+1. Create a [Gumroad](https://gumroad.com) product priced at $50. In its settings enable **"Generate a unique license key per sale."**
+2. Open `js/config.js` and fill in:
+   ```js
+   PAYMENT_LINK: 'https://YOURNAME.gumroad.com/l/stargaze',
+   GUMROAD_PERMALINK: 'stargaze',   // the part after /l/
+   ```
+3. Commit and deploy.
+
+What changes once configured: the landing page's buttons become "Get Stargaze — $50" pointing at your checkout; the game shows an unlock screen after level `PREVIEW_LEVELS` (default 5) where buyers paste their Gumroad license key, which is verified against Gumroad's license API and remembered on that device. While `PAYMENT_LINK` is empty, everything honestly presents as free early access.
+
+Notes: client-side license checks are convenience-grade, not DRM — fine for a $50 indie game. Stripe Payment Links work too for checkout, but Stripe has no license-key API, so keep Gumroad (or Lemon Squeezy) for the unlock step. Marketing claims: the landing copy deliberately avoids medical claims and includes a disclaimer — keep it that way.
 
 ## Running locally
 
-Any static file server works. Camera access is allowed on `localhost` without HTTPS:
-
 ```bash
-npx serve .
-# or
-python3 -m http.server 8000
+python3 -m http.server 8000    # or: npx serve .
 ```
 
-Then open `http://localhost:8000`.
-
-To test on an iPhone you need HTTPS. Easiest options:
-
-- **GitHub Pages** — Settings → Pages → deploy from branch. Free HTTPS, zero config.
-- `npx serve . --ssl-cert ... --ssl-key ...`, Cloudflare Tunnel, ngrok, etc.
-
-## Browser support
-
-- iOS Safari 14.5+ (front camera, requires HTTPS)
-- Chrome / Edge / Firefox on desktop and Android
-- Works offline-hostile? No — MediaPipe models load from the jsDelivr CDN on first start.
+Open `http://localhost:8000`. Camera works on `localhost` without HTTPS; on devices you need HTTPS (GitHub Pages provides it — `.github/workflows/pages.yml` deploys on every push to `main`).
 
 ## Project structure
 
 ```
-index.html        Screens (menu, calibration, pause, game over) + HUD
-css/style.css     Styling
-js/tracking.js    FaceControl: camera + Face Mesh → smoothed [-1,1]² control vector
-js/game.js        Game engine: ball physics, obstacles, scoring, screen flow
+index.html         Marketing landing page (hero, features, pricing, share, FAQ)
+app.html           The game (menu, calibration, HUD, breathing, unlock, summary)
+css/landing.css    Landing styles (night + light themes)
+css/style.css      Game styles (night + light themes)
+js/config.js       Seller config: payment link, license product, price, preview length
+js/theme.js        Theme system + canvas palettes
+js/tracking.js     FaceControl: camera + Face Mesh → smoothed [-1,1]² control
+js/game.js         Game engine: levels, dwell, scoring, screens, paywall gate
+js/landing.js      Landing ambience + pricing/share wiring
+assets/og.png      Social-share image
 ```

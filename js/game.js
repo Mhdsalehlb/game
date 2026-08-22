@@ -15,6 +15,8 @@
 
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
+  const PAL = () => window.StargazeTheme.palette;
+  const CFG = window.STARGAZE_CONFIG || {};
 
   const ui = {
     hud: document.getElementById('hud'),
@@ -32,6 +34,16 @@
     calibTarget: document.getElementById('calibTarget'),
     calibRing: document.getElementById('calibRing'),
     calibStatus: document.getElementById('calibStatus'),
+    calibStep: document.getElementById('calibStep'),
+    recalBtn: document.getElementById('recalBtn'),
+    unlock: document.getElementById('unlockScreen'),
+    unlockMsg: document.getElementById('unlockMsg'),
+    unlockPrice: document.getElementById('unlockPrice'),
+    buyBtn: document.getElementById('buyBtn'),
+    licenseInput: document.getElementById('licenseInput'),
+    licenseBtn: document.getElementById('licenseBtn'),
+    unlockError: document.getElementById('unlockError'),
+    unlockLaterBtn: document.getElementById('unlockLaterBtn'),
     card: document.getElementById('countdown'),
     cardTitle: document.getElementById('countNum'),
     cardHint: document.getElementById('countHint'),
@@ -153,14 +165,16 @@
 
   // --------------------------------------------------------------- game state
 
-  // menu | calibrating | card | playing | flourish | breathing | paused | summary
+  // menu | calibrating | warmup | card | playing | flourish | breathing | paused | unlock | summary
   let state = 'menu';
   let lastTime = 0;
   let cardT = 0;
   let flourishT = 0;
   let breath = { t: 0, phase: '' };
+  const WARMUP_R = 44, WARMUP_HOLD = 0.6, WARMUP_TIMEOUT = 18;
+  const warmup = { target: { x: 0, y: 0 }, inT: 0, t: 0 };
   let best = 0;
-  try { best = Number(localStorage.getItem('focusball.best')) || 0; } catch (e) { /* private mode */ }
+  try { best = Number(localStorage.getItem('stargaze.best')) || 0; } catch (e) { /* private mode */ }
 
   const game = {
     mode: 'both',       // control mode
@@ -408,7 +422,7 @@
     game.stats.starsLit += 1;
     const mult = 1 + Math.min(4, Math.floor(game.streak / 4));
     game.score += 10 * mult;
-    burst(s.x, s.y, '#5eead4', 12);
+    burst(s.x, s.y, PAL().particleStar, 12);
     if (navigator.vibrate) navigator.vibrate(15);
 
     if (game.litCount >= game.stars.length) completeLevel();
@@ -417,7 +431,7 @@
   function distracted(i) {
     const d = game.decoys[i];
     if (!d) return; // decoy may have drifted offscreen this frame
-    burst(d.x, d.y, '#fbbf24', 10);
+    burst(d.x, d.y, PAL().decoyGlow, 10);
     game.decoys.splice(i, 1);
     spawnDecoy();
     game.streak = 0;
@@ -429,7 +443,7 @@
     game.score += 20 + (game.levelMistakes === 0 ? 50 : 0);
     state = 'flourish';
     flourishT = 1.5;
-    for (const s of game.stars) burst(s.x, s.y, '#818cf8', 4);
+    for (const s of game.stars) burst(s.x, s.y, PAL().particleLevel, 4);
   }
 
   function burst(x, y, color, n) {
@@ -449,30 +463,31 @@
   // ------------------------------------------------------------------ render
 
   function render() {
+    const p = PAL();
     const grad = ctx.createLinearGradient(0, 0, 0, H);
-    grad.addColorStop(0, '#0d1330');
-    grad.addColorStop(1, '#0b1020');
+    grad.addColorStop(0, p.bgTop);
+    grad.addColorStop(1, p.bgBot);
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, W, H);
 
     // soft nebulae
-    for (const nb of game.nebulae) {
+    game.nebulae.forEach((nb, i) => {
+      const hue = p.nebulaHues[i % p.nebulaHues.length];
       const g = ctx.createRadialGradient(nb.x, nb.y, 0, nb.x, nb.y, nb.r);
-      g.addColorStop(0, `hsla(${nb.hue}, 70%, 60%, 0.06)`);
+      g.addColorStop(0, `hsla(${hue}, 55%, 55%, ${p.nebulaAlpha})`);
       g.addColorStop(1, 'transparent');
       ctx.fillStyle = g;
       ctx.fillRect(nb.x - nb.r, nb.y - nb.r, nb.r * 2, nb.r * 2);
-    }
+    });
 
     // background twinkle
     for (const s of game.bgStars) {
-      ctx.globalAlpha = 0.25 + 0.3 * (0.5 + 0.5 * Math.sin(s.tw + performance.now() / 900));
-      ctx.fillStyle = '#ffffff';
+      const a = 0.2 + 0.28 * (0.5 + 0.5 * Math.sin(s.tw + performance.now() / 900));
+      ctx.fillStyle = `rgba(${p.bgStar}, ${a.toFixed(3)})`;
       ctx.beginPath();
       ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
       ctx.fill();
     }
-    ctx.globalAlpha = 1;
 
     drawConstellation();
     drawDecoys();
@@ -492,13 +507,14 @@
 
   function drawConstellation() {
     const now = performance.now();
+    const p = PAL();
 
     // links between consecutively lit stars
     ctx.save();
-    ctx.strokeStyle = 'rgba(94, 234, 212, 0.55)';
-    ctx.shadowColor = '#5eead4';
+    ctx.strokeStyle = p.link;
+    ctx.shadowColor = p.linkGlow;
     ctx.shadowBlur = 8;
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 1.8;
     for (let i = 1; i < game.seqIndex; i++) {
       const a = starBySeq(i - 1), b = starBySeq(i);
       if (!a || !b || !a.lit || !b.lit) continue;
@@ -523,28 +539,28 @@
 
       ctx.save();
       if (s.lit) {
-        ctx.shadowColor = '#5eead4';
-        ctx.shadowBlur = 18;
-        ctx.fillStyle = '#8ff7e4';
+        ctx.shadowColor = p.litGlow;
+        ctx.shadowBlur = 16;
+        ctx.fillStyle = p.starLit;
         ctx.beginPath();
-        ctx.arc(s.x, s.y, 7, 0, Math.PI * 2);
+        ctx.arc(s.x, s.y, 6.5, 0, Math.PI * 2);
         ctx.fill();
       } else {
         // unlit star
-        ctx.shadowColor = s.errorT > 0 ? '#fb7185' : '#ffffff';
-        ctx.shadowBlur = s.errorT > 0 ? 16 : 8;
-        ctx.fillStyle = s.errorT > 0 ? '#fda4af' : `rgba(255,255,255,${0.45 + 0.3 * tw})`;
+        ctx.shadowColor = s.errorT > 0 ? p.starError : `rgb(${p.starUnlit})`;
+        ctx.shadowBlur = s.errorT > 0 ? 16 : 7;
+        ctx.fillStyle = s.errorT > 0 ? p.starError : `rgba(${p.starUnlit}, ${(0.5 + 0.3 * tw).toFixed(3)})`;
         ctx.beginPath();
         ctx.arc(s.x, s.y, 5, 0, Math.PI * 2);
         ctx.fill();
 
         // guidance ring: next star in path mode, or during memory playback
         if (isNext || isShowing) {
-          const pulse = 0.5 + 0.5 * Math.sin(now / 220);
-          ctx.strokeStyle = `rgba(94, 234, 212, ${0.35 + 0.45 * pulse})`;
+          const pulse = 0.5 + 0.5 * Math.sin(now / 260);
+          ctx.strokeStyle = `rgba(${p.hint}, ${(0.35 + 0.4 * pulse).toFixed(3)})`;
           ctx.lineWidth = 2;
-          ctx.shadowColor = '#5eead4';
-          ctx.shadowBlur = 12;
+          ctx.shadowColor = `rgb(${p.hint})`;
+          ctx.shadowBlur = 10;
           ctx.beginPath();
           ctx.arc(s.x, s.y, 14 + pulse * 4, 0, Math.PI * 2);
           ctx.stroke();
@@ -553,8 +569,8 @@
         // numbers in ordered mode
         if (game.levelMode === 'ordered') {
           ctx.shadowBlur = 0;
-          ctx.fillStyle = 'rgba(234, 240, 255, 0.85)';
-          ctx.font = '600 13px -apple-system, sans-serif';
+          ctx.fillStyle = p.text;
+          ctx.font = '600 13px Inter, -apple-system, sans-serif';
           ctx.textAlign = 'center';
           ctx.fillText(String(s.order + 1), s.x, s.y - 14);
         }
@@ -566,10 +582,10 @@
       if (dw.kind === 'star' && game.stars[dw.index] === s && dw.t > 0.05) {
         const frac = Math.min(1, dw.t / DWELL_STAR);
         ctx.save();
-        ctx.strokeStyle = '#5eead4';
+        ctx.strokeStyle = p.starLit;
         ctx.lineWidth = 3;
         ctx.lineCap = 'round';
-        ctx.shadowColor = '#5eead4';
+        ctx.shadowColor = p.litGlow;
         ctx.shadowBlur = 10;
         ctx.beginPath();
         ctx.arc(s.x, s.y, 18, -Math.PI / 2, -Math.PI / 2 + frac * Math.PI * 2);
@@ -580,12 +596,13 @@
   }
 
   function drawDecoys() {
+    const p = PAL();
     for (const d of game.decoys) {
       const flick = 0.6 + 0.4 * Math.sin(d.phase);
       ctx.save();
-      ctx.shadowColor = '#fbbf24';
-      ctx.shadowBlur = 14;
-      ctx.fillStyle = `rgba(251, 191, 36, ${0.5 + 0.35 * flick})`;
+      ctx.shadowColor = p.decoyGlow;
+      ctx.shadowBlur = 12;
+      ctx.fillStyle = `rgba(${p.decoy}, ${(0.45 + 0.3 * flick).toFixed(3)})`;
       ctx.beginPath();
       ctx.arc(d.x, d.y, d.r * (0.85 + 0.15 * flick), 0, Math.PI * 2);
       ctx.fill();
@@ -595,7 +612,7 @@
       if (dw.kind === 'decoy' && game.decoys[dw.index] === d && dw.t > 0.05) {
         const frac = Math.min(1, dw.t / DWELL_DECOY);
         ctx.save();
-        ctx.strokeStyle = '#fbbf24';
+        ctx.strokeStyle = p.decoyGlow;
         ctx.lineWidth = 2.5;
         ctx.beginPath();
         ctx.arc(d.x, d.y, 15, -Math.PI / 2, -Math.PI / 2 + frac * Math.PI * 2);
@@ -606,17 +623,51 @@
   }
 
   function drawCursor() {
+    const p = PAL();
     const { x, y } = game.cursor;
     ctx.save();
-    ctx.shadowColor = '#5eead4';
-    ctx.shadowBlur = 20;
+    ctx.shadowColor = p.cursorGlow;
+    ctx.shadowBlur = 18;
     const bg = ctx.createRadialGradient(x - 3, y - 3, 1, x, y, 11);
-    bg.addColorStop(0, '#d7fff5');
-    bg.addColorStop(1, '#2dd4bf');
+    bg.addColorStop(0, p.cursorIn);
+    bg.addColorStop(1, p.cursorOut);
     ctx.fillStyle = bg;
     ctx.beginPath();
     ctx.arc(x, y, 11, 0, Math.PI * 2);
     ctx.fill();
+    ctx.restore();
+  }
+
+  /** Post-calibration warm-up: glide the orb into a ring to prove control. */
+  function drawWarmup() {
+    const p = PAL();
+    const t = warmup.target;
+    const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 300);
+    ctx.save();
+    ctx.strokeStyle = `rgba(${p.hint}, ${(0.5 + 0.3 * pulse).toFixed(3)})`;
+    ctx.lineWidth = 3;
+    ctx.shadowColor = `rgb(${p.hint})`;
+    ctx.shadowBlur = 14;
+    ctx.beginPath();
+    ctx.arc(t.x, t.y, WARMUP_R + pulse * 3, 0, Math.PI * 2);
+    ctx.stroke();
+
+    if (warmup.inT > 0.03) {
+      const frac = Math.min(1, warmup.inT / WARMUP_HOLD);
+      ctx.strokeStyle = p.starLit;
+      ctx.lineWidth = 4;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.arc(t.x, t.y, WARMUP_R + 10, -Math.PI / 2, -Math.PI / 2 + frac * Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    ctx.save();
+    ctx.fillStyle = p.text;
+    ctx.font = '500 16px Inter, -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Glide your orb into the ring', W / 2, Math.max(HUD_CLEAR + 40, t.y - WARMUP_R - 40));
     ctx.restore();
   }
 
@@ -629,6 +680,20 @@
     if (state === 'playing') {
       update(dt);
       render();
+    } else if (state === 'warmup') {
+      const target = readTarget(dt);
+      const ease = Math.min(1, dt * 7);
+      game.cursor.x += (target.x - game.cursor.x) * ease;
+      game.cursor.y += (target.y - game.cursor.y) * ease;
+      render();
+      drawWarmup();
+      warmup.t += dt;
+      const d = Math.hypot(game.cursor.x - warmup.target.x, game.cursor.y - warmup.target.y);
+      warmup.inT = d < WARMUP_R ? warmup.inT + dt : 0;
+      if (warmup.inT >= WARMUP_HOLD || warmup.t >= WARMUP_TIMEOUT) {
+        if (warmup.mid) { lastTime = t; state = 'playing'; }
+        else showLevelCard();
+      }
     } else if (state === 'card') {
       // orb already follows the eyes so the control stays warm
       const target = readTarget(dt);
@@ -739,10 +804,43 @@
     ui.calibTarget.style.top = `${p.y * 100}%`;
   }
 
+  /**
+   * Verified calibration: each edge point is checked against the center
+   * sample — the signal must actually move, mostly along the right axis,
+   * before we advance. A point that doesn't verify is retried with
+   * clearer guidance, so a bad calibration can't silently continue.
+   */
+  const POINT_TIPS = {
+    left: 'Really look at the far left dot — eyes (and head) toward it.',
+    right: 'Look all the way to the right dot.',
+    up: 'Lift your gaze up to the dot.',
+    down: 'Drop your gaze down to the dot.',
+  };
+
+  function pointVerifies(key, sample, center) {
+    if (key === 'center') return true;
+    const dx = sample.x - center.x, dy = sample.y - center.y;
+    const horizontal = key === 'left' || key === 'right';
+    const main = horizontal ? Math.abs(dx) : Math.abs(dy);
+    const cross = horizontal ? Math.abs(dy) : Math.abs(dx);
+    return main >= 0.1 && main >= cross * 0.8;
+  }
+
+  async function samplePointUI(p) {
+    ui.calibStatus.textContent = p.label;
+    placeCalDot(p);
+    await delay(750);
+    ui.calibRing.style.strokeDashoffset = RING_LEN;
+    return tracker.samplePoint(1300, (t) => {
+      ui.calibRing.style.strokeDashoffset = RING_LEN * (1 - t);
+    });
+  }
+
   async function runCalibration() {
     state = 'calibrating';
     ui.calibRing.style.strokeDashoffset = RING_LEN;
     ui.calibStatus.textContent = 'Looking for your face…';
+    ui.calibStep.textContent = '';
     placeCalDot(CAL_POINTS[0]);
 
     const seen = await waitFor(() => tracker.faceVisible, 15000);
@@ -752,18 +850,42 @@
     }
 
     const points = {};
+    const MAX_TRIES = 3;
     try {
-      for (const p of CAL_POINTS) {
-        ui.calibStatus.textContent = p.label;
-        placeCalDot(p);
-        await delay(700);
-        ui.calibRing.style.strokeDashoffset = RING_LEN;
-        points[p.key] = await tracker.samplePoint(1300, (t) => {
-          ui.calibRing.style.strokeDashoffset = RING_LEN * (1 - t);
-        });
+      for (let idx = 0; idx < CAL_POINTS.length; idx++) {
+        const p = CAL_POINTS[idx];
+        ui.calibStep.textContent = `${idx + 1} / ${CAL_POINTS.length}`;
+        let ok = false;
+        for (let attempt = 1; attempt <= MAX_TRIES && !ok; attempt++) {
+          if (attempt > 1) {
+            ui.calibStatus.textContent = `Almost — ${POINT_TIPS[p.key] || p.label}`;
+            await delay(900);
+          }
+          const sample = await samplePointUI(p);
+          if (pointVerifies(p.key, sample, points.center)) {
+            points[p.key] = sample;
+            ok = true;
+          }
+        }
+        if (!ok) {
+          calibrationFailed(
+            `We couldn’t detect your eyes moving ${p.key}. ` +
+            'Sit a bit closer to the camera in even lighting, and move your eyes (or head) clearly toward each dot.');
+          return;
+        }
       }
     } catch (err) {
       calibrationFailed(err.message);
+      return;
+    }
+
+    // pair sanity: opposite directions must actually oppose each other
+    const xOk = (points.left.x - points.center.x) * (points.right.x - points.center.x) < 0;
+    const yOk = (points.up.y - points.center.y) * (points.down.y - points.center.y) < 0;
+    if (!xOk || !yOk) {
+      calibrationFailed(
+        `Your ${!xOk ? 'left and right' : 'up and down'} looks came out too similar. ` +
+        'Try again with clearer eye movements toward each dot.');
       return;
     }
 
@@ -771,17 +893,43 @@
     ui.calibStatus.textContent = 'Calibrated ✓';
     setTimeout(() => {
       hide(ui.calib);
-      beginSession();
+      if (returnToPause) {
+        returnToPause = false;
+        startWarmup(true);
+      } else {
+        beginSession();
+      }
     }, 450);
   }
 
+  let returnToPause = false;
+
   function calibrationFailed(msg) {
     hide(ui.calib);
+    if (returnToPause) {
+      // mid-session recalibration failed — go back to the pause menu
+      returnToPause = false;
+      state = 'paused';
+      ui.pauseTitle.textContent = 'Calibration didn’t take';
+      ui.pauseMsg.textContent = msg;
+      show(ui.pause);
+      return;
+    }
     show(ui.start);
     ui.startError.textContent = msg;
     show(ui.startError);
     tracker.stop();
     state = 'menu';
+  }
+
+  function startWarmup(midSession) {
+    warmup.target = { x: W * 0.5, y: H * 0.42 };
+    warmup.inT = 0;
+    warmup.t = 0;
+    warmup.mid = midSession;
+    show(ui.hud);
+    lastTime = performance.now();
+    state = 'warmup';
   }
 
   function beginSession() {
@@ -802,15 +950,66 @@
     show(ui.hud);
     ui.trackDot.classList.toggle('ok', game.mode === 'touch' || tracker.faceVisible);
     updateHud();
-    showLevelCard();
+    // eye/head players get a quick "glide into the ring" control check first
+    if (game.mode === 'touch') showLevelCard();
+    else startWarmup(false);
+  }
+
+  function isUnlocked() {
+    try { return !!localStorage.getItem('stargaze.license'); } catch (e) { return false; }
   }
 
   function nextLevel() {
-    game.level += 1;
+    const next = game.level + 1;
+    // paywall only once selling is configured; otherwise free early access
+    if (CFG.PAYMENT_LINK && !isUnlocked() && next > (CFG.PREVIEW_LEVELS || 5)) {
+      showUnlock();
+      return;
+    }
+    game.level = next;
     makeLevel(game.level);
     updateHud();
     if ((game.level - 1) % 3 === 0 && game.level > 1) startBreathing();
     else showLevelCard();
+  }
+
+  function showUnlock() {
+    state = 'unlock';
+    ui.unlockPrice.textContent = CFG.PRICE || '$50';
+    ui.buyBtn.href = CFG.PAYMENT_LINK || '#';
+    hide(ui.unlockError);
+    show(ui.unlock);
+  }
+
+  async function tryLicense() {
+    const key = ui.licenseInput.value.trim();
+    if (!key) return;
+    ui.licenseBtn.disabled = true;
+    ui.licenseBtn.textContent = 'Checking…';
+    try {
+      const body = new URLSearchParams({
+        product_permalink: CFG.GUMROAD_PERMALINK || '',
+        license_key: key,
+      });
+      const res = await fetch('https://api.gumroad.com/v2/licenses/verify', { method: 'POST', body });
+      const data = await res.json();
+      if (data && data.success) {
+        try { localStorage.setItem('stargaze.license', key); } catch (e) { /* private mode */ }
+        hide(ui.unlock);
+        game.level += 1;
+        makeLevel(game.level);
+        updateHud();
+        showLevelCard();
+      } else {
+        ui.unlockError.textContent = 'That key didn’t verify. Check for typos, or contact us with your receipt.';
+        show(ui.unlockError);
+      }
+    } catch (e) {
+      ui.unlockError.textContent = 'Couldn’t reach the license server. Check your connection and try again.';
+      show(ui.unlockError);
+    }
+    ui.licenseBtn.disabled = false;
+    ui.licenseBtn.textContent = 'Unlock';
   }
 
   function showLevelCard() {
@@ -842,7 +1041,7 @@
     const score = Math.floor(game.score);
     if (score > best) {
       best = score;
-      try { localStorage.setItem('focusball.best', String(best)); } catch (e) { /* private mode */ }
+      try { localStorage.setItem('stargaze.best', String(best)); } catch (e) { /* private mode */ }
       ui.bestScore.textContent = '🏆 New best!';
     } else {
       ui.bestScore.textContent = `Best: ${best}`;
@@ -887,6 +1086,7 @@
     hide(ui.hud);
     hide(ui.card);
     hide(ui.breath);
+    hide(ui.unlock);
     show(ui.start);
   }
 
@@ -895,6 +1095,16 @@
   ui.resumeBtn.addEventListener('click', resumeGame);
   ui.quitBtn.addEventListener('click', endSession);
   ui.breathSkip.addEventListener('click', endBreathing);
+  ui.recalBtn.addEventListener('click', () => {
+    if (game.mode === 'touch') { resumeGame(); return; }
+    returnToPause = true;
+    hide(ui.pause);
+    hide(ui.hud);
+    show(ui.calib);
+    runCalibration();
+  });
+  ui.licenseBtn.addEventListener('click', tryLicense);
+  ui.unlockLaterBtn.addEventListener('click', () => { hide(ui.unlock); endSession(); });
   ui.retryBtn.addEventListener('click', () => {
     if (game.mode === 'touch' || tracker.isCalibrated) beginSession();
     else quitToMenu();

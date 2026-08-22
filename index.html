@@ -2,125 +2,171 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-  <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="theme-color" content="#0b1020" />
-  <title>FocusBall — Eye-Tracking Focus Game</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>👁️</text></svg>" />
-  <link rel="stylesheet" href="css/style.css" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0a0e1f" />
+  <title>Stargaze — Focus training you play with your eyes</title>
+  <meta name="description" content="Weave constellations with your gaze. A calm, eye-controlled game that trains sustained attention, memory, and distraction resistance. One purchase, yours forever." />
+
+  <!-- Social sharing -->
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="Stargaze — Focus training you play with your eyes" />
+  <meta property="og:description" content="Weave constellations with your gaze. Calm, progressive focus training — no ads, everything on-device." />
+  <meta property="og:image" content="https://mhdsalehlb.github.io/game/assets/og.png" />
+  <meta property="og:url" content="https://mhdsalehlb.github.io/game/" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Stargaze — Focus training you play with your eyes" />
+  <meta name="twitter:description" content="Weave constellations with your gaze. Calm, progressive focus training." />
+  <meta name="twitter:image" content="https://mhdsalehlb.github.io/game/assets/og.png" />
+
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>✦</text></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/landing.css" />
 </head>
 <body>
-  <!-- Hidden camera feed used for face/eye tracking -->
-  <video id="camera" playsinline muted autoplay></video>
+  <canvas id="sky" aria-hidden="true"></canvas>
 
-  <canvas id="game"></canvas>
-
-  <!-- HUD -->
-  <div id="hud" class="hidden">
-    <div class="hud-left">
-      <div id="score" class="hud-pill">0</div>
-      <div id="streak" class="hud-pill streak hidden">FOCUS ×1</div>
+  <header class="nav">
+    <div class="brand">✦ Stargaze</div>
+    <div class="nav-right">
+      <button class="icon-btn theme-btn" aria-label="Toggle theme">☾</button>
+      <a class="nav-cta" href="app.html">Play</a>
     </div>
-    <div class="hud-right">
-      <div id="levelPill" class="hud-pill">✦ L1</div>
-      <div id="trackDot" class="track-dot" title="Tracking status"></div>
-      <button id="pauseBtn" class="icon-btn" aria-label="Pause">⏸</button>
-    </div>
-  </div>
+  </header>
 
-  <!-- Start screen -->
-  <div id="startScreen" class="screen">
-    <div class="panel">
-      <div class="logo">👁️</div>
-      <h1>FocusBall</h1>
-      <p class="tagline">Weave constellations with your eyes.<br/>
-        Rest your gaze on a star to light it.<br/>
-        Slow down. Rebuild your focus.</p>
-
-      <div class="settings">
-        <label class="setting">
-          <span>Control mode</span>
-          <select id="modeSelect">
-            <option value="both" selected>Head + Eyes</option>
-            <option value="head">Head only</option>
-            <option value="eyes">Eyes only</option>
-            <option value="touch">Touch / Keyboard</option>
-          </select>
-        </label>
-        <label class="setting">
-          <span>Sensitivity</span>
-          <input id="sensitivity" type="range" min="0.6" max="1.8" step="0.05" value="1" />
-        </label>
+  <main>
+    <!-- Hero -->
+    <section class="hero">
+      <h1>Restore your focus,<br/><em>one star at a time.</em></h1>
+      <p class="sub">Stargaze is a calm game you play <strong>with your eyes</strong>. Rest your gaze
+        on a star to light it, weave the constellation, and train the attention muscles
+        modern life wears down — a few gentle minutes at a time.</p>
+      <div class="hero-cta">
+        <a id="heroBuy" class="btn-primary" href="app.html">Play the preview</a>
+        <a class="btn-ghost" href="#how">How it works</a>
       </div>
+      <p class="hero-note">Works in your phone's browser · Nothing to install · Your camera feed never leaves your device</p>
+    </section>
 
-      <button id="startBtn" class="primary-btn">Start</button>
-      <p class="hint">Uses your front camera, processed entirely on your device.<br/>
-        Nothing is recorded or uploaded.</p>
-      <p id="startError" class="error hidden"></p>
-    </div>
-  </div>
+    <!-- How it works -->
+    <section id="how" class="section">
+      <h2>How it works</h2>
+      <div class="cards three">
+        <div class="card">
+          <div class="card-num">1</div>
+          <h3>Calibrate in seconds</h3>
+          <p>Follow a glowing dot with your eyes — center, left, right, up, down. Stargaze
+            verifies every step and learns <em>your</em> exact range of motion before you begin.</p>
+        </div>
+        <div class="card">
+          <div class="card-num">2</div>
+          <h3>Weave with your gaze</h3>
+          <p>A luminous orb follows wherever you look. Rest it on a star until the ring fills —
+            the star lights, and golden threads weave the constellation together.</p>
+        </div>
+        <div class="card">
+          <div class="card-num">3</div>
+          <h3>Grow, calmly</h3>
+          <p>No lives, no game over, no time pressure. Levels deepen instead of speeding up,
+            and every third one ends in a guided breathing moment.</p>
+        </div>
+      </div>
+    </section>
 
-  <!-- Calibration screen: the dot glides to 5 positions to learn your range -->
-  <div id="calibScreen" class="screen hidden">
-    <div class="calib-instructions">
-      <h2>Calibration</h2>
-      <p>Hold your phone at a comfortable distance.<br/>
-        Keep your head relaxed and follow the dot with your eyes.</p>
-    </div>
-    <div id="calibTarget" class="calib-target">
-      <svg viewBox="0 0 120 120" width="120" height="120">
-        <circle class="calib-ring-bg" cx="60" cy="60" r="52" />
-        <circle id="calibRing" class="calib-ring" cx="60" cy="60" r="52" />
-      </svg>
-      <div class="calib-dot"></div>
-    </div>
-    <p id="calibStatus" class="calib-status">Looking for your face…</p>
-  </div>
+    <!-- Training -->
+    <section class="section">
+      <h2>Each level trains a different attention skill</h2>
+      <div class="cards two">
+        <div class="card"><h3>🌌 Sustained attention</h3><p>The dwell itself — holding your gaze steady — is the core exercise. Stillness is rewarded, twitchiness is not.</p></div>
+        <div class="card"><h3>🧭 Guided shifting</h3><p>Path levels move your attention deliberately from point to point, like a slow breath for your eyes.</p></div>
+        <div class="card"><h3>🔢 Visual search & sequencing</h3><p>Ordered levels ask you to find numbered stars and light them in sequence — search, hold, repeat.</p></div>
+        <div class="card"><h3>🧠 Working memory</h3><p>Memory levels flash the pattern once, then ask you to reproduce it unaided. Mistakes gently replay it.</p></div>
+        <div class="card"><h3>🕯️ Distraction resistance</h3><p>Drifting embers cross the sky. Letting your gaze linger on one breaks your streak — noticing without following is the skill.</p></div>
+        <div class="card"><h3>🌬️ Breathing interludes</h3><p>Guided 4-in / 4-out breathing between levels keeps the session a wind-down, not a workout.</p></div>
+      </div>
+      <p class="fineprint">Stargaze is built around classic attention-training exercise patterns. It is a game for
+        calm practice — not a medical device, and not a treatment for any condition.</p>
+    </section>
 
-  <!-- Level card overlay -->
-  <div id="countdown" class="countdown hidden">
-    <div id="countNum" class="count-num">Level 1</div>
-    <div id="countHint" class="count-hint"></div>
-  </div>
+    <!-- Privacy -->
+    <section class="section split">
+      <div>
+        <h2>Private by design</h2>
+        <p class="lead">Eye tracking runs entirely <strong>on your device</strong> using your browser and front camera.
+          No video is recorded, stored, or uploaded — ever. No account, no ads, no tracking pixels.
+          Close the tab and nothing of you remains anywhere.</p>
+      </div>
+      <div class="privacy-badges">
+        <div class="badge">📷 Camera stays on-device</div>
+        <div class="badge">🚫 No ads, no analytics</div>
+        <div class="badge">👤 No account needed</div>
+        <div class="badge">🌗 Night & light themes</div>
+      </div>
+    </section>
 
-  <!-- Breathing interlude -->
-  <div id="breathScreen" class="screen overlay hidden">
-    <div class="breath-wrap">
-      <div id="breathCircle" class="breath-circle"></div>
-      <p id="breathText" class="breath-text">Breathe in…</p>
-    </div>
-    <button id="breathSkip" class="ghost-btn breath-skip">Skip</button>
-  </div>
+    <!-- Pricing -->
+    <section id="pricing" class="section">
+      <h2>One price. Yours forever.</h2>
+      <div class="price-card">
+        <div class="price-badge">Lifetime</div>
+        <div class="price"><span id="priceValue">$50</span></div>
+        <p class="price-sub">Pay once. Every level, every future update, forever.<br/>No subscription. No upsells.</p>
+        <ul class="price-list">
+          <li>✦ All level types & endless progression</li>
+          <li>✦ Night and light themes</li>
+          <li>✦ Session focus reports</li>
+          <li>✦ All future updates included</li>
+        </ul>
+        <a id="buyLink" class="btn-primary big" href="app.html">Play the free preview</a>
+        <p id="buyNote" class="fineprint">Early access — the full game is free to play while purchases open up.</p>
+      </div>
+    </section>
 
-  <!-- Pause overlay -->
-  <div id="pauseScreen" class="screen overlay hidden">
-    <div class="panel small">
-      <h2 id="pauseTitle">Paused</h2>
-      <p id="pauseMsg">Take a breath.</p>
-      <button id="resumeBtn" class="primary-btn">Resume</button>
-      <button id="quitBtn" class="ghost-btn">End session</button>
-    </div>
-  </div>
+    <!-- Share -->
+    <section class="section share-section">
+      <h2>Know someone who can't put their phone down?</h2>
+      <p class="lead">Send them a calmer way to use it.</p>
+      <div class="share-row">
+        <a class="share-btn" id="shareX" target="_blank" rel="noopener">Share on X</a>
+        <a class="share-btn" id="shareWa" target="_blank" rel="noopener">WhatsApp</a>
+        <a class="share-btn" id="shareTg" target="_blank" rel="noopener">Telegram</a>
+        <button class="share-btn" id="shareCopy">Copy link</button>
+      </div>
+    </section>
 
-  <!-- Session summary screen -->
-  <div id="overScreen" class="screen overlay hidden">
-    <div class="panel small">
-      <h2>Session complete</h2>
-      <div class="final-score"><span id="finalScore">0</span> pts</div>
-      <p id="bestScore" class="best"></p>
-      <div id="sumStats" class="sum-stats"></div>
-      <p id="focusReport" class="focus-report"></p>
-      <button id="retryBtn" class="primary-btn">Weave again</button>
-      <button id="menuBtn" class="ghost-btn">Menu</button>
-    </div>
-  </div>
+    <!-- FAQ -->
+    <section class="section faq">
+      <h2>Questions</h2>
+      <details>
+        <summary>Does it really track my eyes?</summary>
+        <p>Yes — it uses your front camera and MediaPipe Face Mesh (478 facial landmarks, including your irises)
+          running inside your browser. You can also choose head-only control, or a touch/keyboard mode.</p>
+      </details>
+      <details>
+        <summary>What do I need?</summary>
+        <p>A phone, tablet, or laptop with a front camera and a modern browser (Safari on iPhone works great).
+          Even, soft lighting on your face gives the best tracking.</p>
+      </details>
+      <details>
+        <summary>Is my camera footage uploaded anywhere?</summary>
+        <p>No. All processing happens on your device, in the browser tab. Nothing is recorded or transmitted.</p>
+      </details>
+      <details>
+        <summary>Is this a medical treatment?</summary>
+        <p>No. Stargaze is a calm game built around attention-exercise patterns. It makes no medical claims
+          and is not a substitute for professional care.</p>
+      </details>
+    </section>
+  </main>
 
-  <!-- MediaPipe Face Mesh (face + iris landmarks, all on-device) -->
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1675466862/camera_utils.js" crossorigin="anonymous"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/face_mesh.js" crossorigin="anonymous"></script>
+  <footer class="footer">
+    <div>✦ Stargaze</div>
+    <div class="footer-dim">Made for calmer minds · <a href="app.html">Play</a></div>
+  </footer>
 
-  <script src="js/tracking.js"></script>
-  <script src="js/game.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/theme.js"></script>
+  <script src="js/landing.js"></script>
 </body>
 </html>

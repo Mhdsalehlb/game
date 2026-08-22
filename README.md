@@ -41,6 +41,11 @@ What changes once configured: the landing page's buttons become "Get Stargaze �
 
 Notes: client-side license checks are convenience-grade, not DRM — fine for a $50 indie game. Stripe Payment Links work too for checkout, but Stripe has no license-key API, so keep Gumroad (or Lemon Squeezy) for the unlock step. Marketing claims: the landing copy deliberately avoids medical claims and includes a disclaimer — keep it that way.
 
+## App experience & challenges
+
+- **PWA**: `manifest.webmanifest` + `sw.js` make Stargaze installable (Add to Home Screen on iOS, Install on Android/desktop) with an offline shell — the app opens with no network, and MediaPipe files are cached after the first online play. Bump `CACHE_VERSION` in `sw.js` when cached assets change shape.
+- **Challenge links**: the session summary's "✦ Challenge a friend" shares `app.html?c=<constellation>&p=<precision>` via the native share sheet (clipboard fallback). Opening one shows a challenge banner and plays that constellation in ordered mode; the summary compares precision against the challenger, and the next session returns to normal progression.
+
 ## Running locally
 
 ```bash

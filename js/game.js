@@ -43,6 +43,8 @@
     licenseBtn: document.getElementById('licenseBtn'),
     unlockError: document.getElementById('unlockError'),
     unlockLaterBtn: document.getElementById('unlockLaterBtn'),
+    challengeBanner: document.getElementById('challengeBanner'),
+    challengeShareBtn: document.getElementById('challengeShareBtn'),
     card: document.getElementById('countdown'),
     cardPre: document.getElementById('cardPre'),
     cardTitle: document.getElementById('countNum'),
@@ -178,6 +180,8 @@
   let breath = { t: 0, phase: '' };
   const WARMUP_R = 44, WARMUP_HOLD = 0.6, WARMUP_TIMEOUT = 18;
   const warmup = { target: { x: 0, y: 0 }, inT: 0, t: 0 };
+  let challengeDone = false; // a challenge link plays once, then normal sessions
+  let lastShare = null;      // {constellation, acc} for "Challenge a friend"
   let best = 0;
   try { best = Number(localStorage.getItem('stargaze.best')) || 0; } catch (e) { /* private mode */ }
 
@@ -247,10 +251,22 @@
     return pool[skyCursor[count]++];
   }
 
-  function makeLevel(n) {
-    game.levelMode = levelModeFor(n);
+  // ---- challenge links: app.html?c=<constellation>&p=<precision> ----
+
+  const slugOf = (name) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+
+  const challenge = (() => {
+    const q = new URLSearchParams(location.search);
+    const c = SKY.find((k) => slugOf(k.name) === q.get('c'));
+    if (!c) return null;
+    const p = Math.min(100, Math.max(0, Math.round(Number(q.get('p'))))) || null;
+    return { constellation: c, targetP: p };
+  })();
+
+  function makeLevel(n, forced) {
+    game.levelMode = forced ? 'ordered' : levelModeFor(n);
     const count = Math.min(8, 3 + Math.floor((n - 1) / 2));
-    const c = pickConstellation(count);
+    const c = forced || pickConstellation(count);
     game.constellation = c;
 
     // fit the constellation's canonical shape to the playfield,
@@ -1026,8 +1042,10 @@
     game.cursor.y = H / 2;
     game.particles = [];
     kb.x = 0; kb.y = 0;
+    game.inChallenge = !!(challenge && !challengeDone);
+    if (!game.inChallenge) hide(ui.challengeBanner);
     makeBackground();
-    makeLevel(game.level);
+    makeLevel(game.level, game.inChallenge ? challenge.constellation : null);
     hide(ui.start);
     hide(ui.over);
     hide(ui.pause);
@@ -1044,6 +1062,12 @@
   }
 
   function nextLevel() {
+    // a challenge is a single constellation — straight to the verdict
+    if (game.inChallenge) {
+      challengeDone = true;
+      endSession();
+      return;
+    }
     const next = game.level + 1;
     // paywall only once selling is configured; otherwise free early access
     if (CFG.PAYMENT_LINK && !isUnlocked() && next > (CFG.PREVIEW_LEVELS || 5)) {
@@ -1156,13 +1180,46 @@
 
     const total = game.stats.starsLit + game.stats.mistakes;
     const acc = total ? Math.round((game.stats.starsLit / total) * 100) : 100;
-    ui.focusReport.textContent =
-      acc >= 90 ? `${acc}% precision — calm, deliberate attention. Beautiful.` :
-      acc >= 70 ? `${acc}% precision — steady progress. Focus grows with practice.` :
-      `${acc}% precision — slow down and let the ring fill. That pause IS the training.`;
+    lastShare = { constellation: game.constellation, acc };
+
+    if (game.inChallenge && challenge.targetP !== null) {
+      const t = challenge.targetP;
+      ui.focusReport.textContent =
+        acc > t ? `You wove ${game.constellation.name} at ${acc}% — your friend scored ${t}%. You win! ✦` :
+        acc === t ? `A perfect tie — ${acc}% each on ${game.constellation.name}. The stars are amused.` :
+        `${acc}% vs your friend's ${t}% on ${game.constellation.name}. So close — weave it again.`;
+    } else {
+      ui.focusReport.textContent =
+        acc >= 90 ? `${acc}% precision — calm, deliberate attention. Beautiful.` :
+        acc >= 70 ? `${acc}% precision — steady progress. Focus grows with practice.` :
+        `${acc}% precision — slow down and let the ring fill. That pause IS the training.`;
+    }
+    game.inChallenge = false;
 
     hide(ui.hud);
     show(ui.over);
+  }
+
+  async function shareChallenge() {
+    if (!lastShare) return;
+    const base = location.origin + location.pathname;
+    const url = `${base}?c=${slugOf(lastShare.constellation.name)}&p=${lastShare.acc}`;
+    const text = `I wove ${lastShare.constellation.name} with my eyes at ${lastShare.acc}% precision on Stargaze ✦ Think you can beat me?`;
+    const btn = ui.challengeShareBtn;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: 'Stargaze challenge', text, url });
+        return;
+      }
+      await navigator.clipboard.writeText(`${text} ${url}`);
+      btn.textContent = 'Challenge copied ✓';
+    } catch (e) {
+      try {
+        await navigator.clipboard.writeText(`${text} ${url}`);
+        btn.textContent = 'Challenge copied ✓';
+      } catch (e2) { btn.textContent = url; }
+    }
+    setTimeout(() => { btn.textContent = '✦ Challenge a friend'; }, 2500);
   }
 
   function quitToMenu() {
@@ -1193,6 +1250,15 @@
   });
   ui.licenseBtn.addEventListener('click', tryLicense);
   ui.unlockLaterBtn.addEventListener('click', () => { hide(ui.unlock); endSession(); });
+  ui.challengeShareBtn.addEventListener('click', shareChallenge);
+
+  // arriving via a challenge link: greet the challenge on the start screen
+  if (challenge) {
+    ui.challengeBanner.textContent = challenge.targetP !== null
+      ? `✦ Challenge: weave ${challenge.constellation.name} in order — beat ${challenge.targetP}%`
+      : `✦ Challenge: weave ${challenge.constellation.name} in order`;
+    show(ui.challengeBanner);
+  }
   ui.retryBtn.addEventListener('click', () => {
     if (game.mode === 'touch' || tracker.isCalibrated) beginSession();
     else quitToMenu();

@@ -66,11 +66,12 @@
   </div>
 
   <!-- Calibration screen: the dot glides to 5 positions; each is verified -->
-  <div id="calibScreen" class="screen hidden">
+  <div id="calibScreen" class="screen calib-screen hidden">
     <div class="calib-instructions">
-      <h2>Calibration <span id="calibStep" class="calib-step"></span></h2>
-      <p id="calibGuide">Keep your head comfortable and still.<br/>
-        Follow the dot <strong>with your eyes</strong> — we check each step before moving on.</p>
+      <h2>Attune your gaze</h2>
+      <p id="calibGuide">Keep your head relaxed and follow the dot <strong>with your eyes</strong>.<br/>
+        Each step is verified before the next begins.</p>
+      <div id="calibDots" class="calib-progress"></div>
     </div>
     <div id="calibTarget" class="calib-target">
       <svg viewBox="0 0 120 120" width="120" height="120">
@@ -84,8 +85,15 @@
 
   <!-- Level card overlay -->
   <div id="countdown" class="countdown hidden">
-    <div id="countNum" class="count-num">Level 1</div>
+    <div id="cardPre" class="card-pre">Level 1</div>
+    <div id="countNum" class="count-num">Cassiopeia</div>
     <div id="countHint" class="count-hint"></div>
+  </div>
+
+  <!-- Constellation fact, shown while the finished pattern glows -->
+  <div id="factCard" class="fact-card hidden">
+    <div id="factTitle" class="fact-title">✦ Cassiopeia</div>
+    <p id="factText" class="fact-text"></p>
   </div>
 
   <!-- Breathing interlude -->
@@ -144,6 +152,7 @@
 
   <script src="js/config.js"></script>
   <script src="js/theme.js"></script>
+  <script src="js/constellations.js"></script>
   <script src="js/tracking.js"></script>
   <script src="js/game.js"></script>
 </body>

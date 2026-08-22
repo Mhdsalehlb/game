@@ -1,34 +1,34 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 :root {
-  /* Night (default): deep indigo sky, warm starlight, moonlit blue */
-  --bg: #0a0e1f;
-  --bg2: #131a35;
-  --ink: #edeef6;
-  --dim: #9aa3c4;
-  --accent: #e8c96a;        /* warm starlight gold */
-  --accent-soft: #f2dc9f;
-  --accent2: #9fc0e8;       /* moonlit blue */
-  --danger: #e8a0b4;        /* dusk rose */
-  --panel: rgba(17, 23, 48, 0.92);
-  --panel-border: rgba(237, 238, 246, 0.08);
-  --pill-bg: rgba(12, 16, 34, 0.65);
-  --btn-ink: #241c07;
+  /* Night (default): ink indigo, champagne gold, silver-blue */
+  --bg: #0b0d18;
+  --bg2: #141830;
+  --ink: #e9e9f0;
+  --dim: #969db8;
+  --accent: #d9c28f;        /* champagne */
+  --accent-soft: #e7d6ae;
+  --accent2: #aab6d3;       /* silver-blue */
+  --danger: #c493a2;        /* muted rose */
+  --panel: rgba(16, 19, 38, 0.92);
+  --panel-border: rgba(233, 233, 240, 0.07);
+  --pill-bg: rgba(11, 13, 24, 0.6);
+  --btn-ink: #241f10;
 }
 
 body.light {
-  /* Dawn: warm mist, deep indigo ink, antique gold */
-  --bg: #f6f3ec;
-  --bg2: #e7ebf4;
-  --ink: #2c3149;
-  --dim: #6a7290;
-  --accent: #b8923a;
-  --accent-soft: #c9a24b;
-  --accent2: #4a6fa5;
-  --danger: #c76a85;
-  --panel: rgba(255, 253, 248, 0.94);
-  --panel-border: rgba(44, 49, 73, 0.1);
-  --pill-bg: rgba(255, 253, 248, 0.75);
+  /* Dawn: warm mist, ink indigo, antique gold */
+  --bg: #f5f4f0;
+  --bg2: #e8eaf0;
+  --ink: #33384e;
+  --dim: #6f7590;
+  --accent: #a3894c;
+  --accent-soft: #b89a55;
+  --accent2: #5f7396;
+  --danger: #ba7890;
+  --panel: rgba(253, 252, 249, 0.94);
+  --panel-border: rgba(51, 56, 78, 0.09);
+  --pill-bg: rgba(253, 252, 249, 0.72);
   --btn-ink: #fffdf6;
 }
 
@@ -197,6 +197,44 @@ h2 {
 }
 
 /* ---------- Calibration ---------- */
+/* translucent over the live starfield canvas */
+.calib-screen {
+  background: color-mix(in srgb, var(--bg) 45%, transparent);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+
+.calib-progress {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  margin-top: 18px;
+  pointer-events: none;
+}
+
+.calib-progress-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: transparent;
+  border: 1.5px solid var(--dim);
+  opacity: 0.55;
+  transition: all 0.3s ease;
+}
+
+.calib-progress-dot.active {
+  border-color: var(--accent);
+  opacity: 1;
+  transform: scale(1.25);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 60%, transparent);
+}
+
+.calib-progress-dot.done {
+  background: var(--accent);
+  border-color: var(--accent);
+  opacity: 1;
+}
+
 .calib-instructions {
   position: absolute;
   top: calc(24px + env(safe-area-inset-top));
@@ -288,12 +326,59 @@ h2 {
   pointer-events: none;
 }
 
+.card-pre {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 6px;
+}
+
 .count-num {
   font-family: 'Cormorant Garamond', Georgia, serif;
-  font-size: 54px;
+  font-size: 46px;
   font-weight: 600;
   color: var(--ink);
   text-shadow: 0 2px 30px var(--bg);
+}
+
+/* ---------- Constellation fact card ---------- */
+.fact-card {
+  position: fixed;
+  left: 50%;
+  bottom: calc(40px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  width: min(400px, 88vw);
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 18px;
+  padding: 18px 22px;
+  text-align: center;
+  z-index: 14;
+  pointer-events: none;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  animation: fact-in 0.5s ease;
+}
+
+@keyframes fact-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(14px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+.fact-title {
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  font-size: 21px;
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 5px;
+}
+
+.fact-text {
+  color: var(--dim);
+  font-size: 13.5px;
+  line-height: 1.55;
 }
 
 .count-hint {

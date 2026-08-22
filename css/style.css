@@ -121,6 +121,18 @@ h2 {
 
 .tagline { color: var(--dim); margin: 10px 0 22px; line-height: 1.6; font-size: 15px; }
 
+.challenge-banner {
+  margin: 0 0 18px;
+  padding: 12px 16px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
 .settings { margin-bottom: 22px; text-align: left; }
 
 .setting {
